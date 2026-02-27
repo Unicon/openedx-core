@@ -33,6 +33,9 @@ TAXONOMY_TAGS_URL = "/tagging/rest_api/v1/taxonomies/{pk}/tags/"
 TAXONOMY_TAGS_IMPORT_URL = "/tagging/rest_api/v1/taxonomies/{pk}/tags/import/"
 TAXONOMY_TAGS_IMPORT_PLAN_URL = "/tagging/rest_api/v1/taxonomies/{pk}/tags/import/plan/"
 TAXONOMY_CREATE_IMPORT_URL = "/tagging/rest_api/v1/taxonomies/import/"
+TAXONOMY_TAGS_DEBUG_MARKER_QUERY_PARAM = "debug_marker"
+TAXONOMY_TAGS_DEBUG_MARKER_HEADER = "X-Unicon-Smoke-Marker"
+TAXONOMY_TAGS_DEBUG_MARKER_VALUE = "unicon-smoke-2026-02-27"
 
 
 OBJECT_TAGS_RETRIEVE_URL = "/tagging/rest_api/v1/object_tags/{object_id}/"
@@ -1436,6 +1439,20 @@ class TestTaxonomyTagsView(TestTaxonomyViewMixin):
         assert data.get("num_pages") == 1
         assert data.get("current_page") == 1
         assert data.get("can_add_tag")
+
+    def test_small_taxonomy_debug_marker_header(self):
+        self.client.force_authenticate(user=self.staff)
+        response = self.client.get(
+            f"{self.small_taxonomy_url}?{TAXONOMY_TAGS_DEBUG_MARKER_QUERY_PARAM}=1"
+        )
+        assert response.status_code == status.HTTP_200_OK
+        assert response.headers.get(TAXONOMY_TAGS_DEBUG_MARKER_HEADER) == TAXONOMY_TAGS_DEBUG_MARKER_VALUE
+
+    def test_small_taxonomy_debug_marker_header_not_set_by_default(self):
+        self.client.force_authenticate(user=self.staff)
+        response = self.client.get(self.small_taxonomy_url)
+        assert response.status_code == status.HTTP_200_OK
+        assert response.headers.get(TAXONOMY_TAGS_DEBUG_MARKER_HEADER) is None
 
     def test_small_taxonomy(self):
         """
