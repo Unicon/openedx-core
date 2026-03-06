@@ -767,18 +767,6 @@ class TaxonomyTagsView(ListAPIView, RetrieveUpdateDestroyAPIView):
     permission_classes = [TaxonomyTagsObjectPermissions]
     pagination_class = TagsPagination
     serializer_class = TagDataSerializer
-    debug_marker_query_param = "debug_marker"
-    debug_marker_header = "X-Unicon-Smoke-Marker"
-    debug_marker_value = "unicon-smoke-2026-02-27"
-
-    def list(self, request, *args, **kwargs) -> Response:
-        """
-        Optionally add a smoke-test marker header for deployment verification.
-        """
-        response = super().list(request, *args, **kwargs)
-        if request.query_params.get(self.debug_marker_query_param) == "1":
-            response[self.debug_marker_header] = self.debug_marker_value
-        return response
 
     def __init__(self, *args, **kwargs):
         """
