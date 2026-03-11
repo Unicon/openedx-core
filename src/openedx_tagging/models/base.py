@@ -6,10 +6,11 @@ from __future__ import annotations
 import logging
 import re
 from typing import List
-
+from django.core import serializers
 from django.core.exceptions import ValidationError
 from django.db import models
 from django.db.models import F, Q, Value
+from django.db.models.expressions import RawSQL
 from django.db.models.functions import Concat, Lower
 from django.utils.functional import cached_property
 from django.utils.module_loading import import_string
@@ -26,6 +27,24 @@ log = logging.getLogger(__name__)
 
 # Maximum depth allowed for a hierarchical taxonomy's tree of tags.
 TAXONOMY_MAX_DEPTH = 3
+
+RECURSIVE_TAG_COUNT_QUERY = '''
+    WITH RECURSIVE tag_lineage_by_usage AS (
+        -- Anchor
+        SELECT ott.value, ott.id, ott.parent_id
+        FROM oel_tagging_objecttag oto
+        JOIN oel_tagging_tag ott on oto.tag_id = ott.id
+        UNION ALL
+        -- recursion
+        SELECT ott.value, ott.id, ott.parent_id
+        FROM oel_tagging_tag ott
+        INNER JOIN tag_lineage_by_usage tlbu ON tlbu.parent_id = ott.id
+    )
+    SELECT COUNT(tlbu.id)
+    FROM tag_lineage_by_usage tlbu
+    WHERE tlbu.id = oel_tagging_tag.id
+    GROUP BY tlbu.id
+    '''
 
 # Ancestry of a given tag; the Tag.value fields of a given tag and its parents, starting from the root.
 # Will contain 0...TAXONOMY_MAX_DEPTH elements.
@@ -501,16 +520,7 @@ class Taxonomy(models.Model):
         qs = qs.values("value", "child_count", "descendant_count", "depth", "parent_value", "external_id", "_id")
         qs = qs.order_by("value")
         if include_counts:
-            # We need to include the count of how many times this tag is used to tag objects.
-            # You'd think we could just use:
-            #     qs = qs.annotate(usage_count=models.Count("objecttag__pk"))
-            # but that adds another join which starts creating a cross product and the children and usage_count become
-            # intertwined and multiplied with each other. So we use a subquery.
-            obj_tags = ObjectTag.objects.filter(tag_id=models.OuterRef("pk")).order_by().annotate(
-                # We need to use Func() to get Count() without GROUP BY - see https://stackoverflow.com/a/69031027
-                count=models.Func(F('id'), function='Count')
-            )
-            qs = qs.annotate(usage_count=models.Subquery(obj_tags.values('count')))
+            qs = qs.annotate(usage_count=RawSQL(RECURSIVE_TAG_COUNT_QUERY, []))
         return qs  # type: ignore[return-value]
 
     def _get_filtered_tags_deep(
@@ -593,12 +603,7 @@ class Taxonomy(models.Model):
         qs = qs.values("value", "child_count", "descendant_count", "depth", "parent_value", "external_id", "_id")
         qs = qs.order_by("sort_key")
         if include_counts:
-            # Including the counts is a bit tricky; see the comment above in _get_filtered_tags_one_level()
-            obj_tags = ObjectTag.objects.filter(tag_id=models.OuterRef("pk")).order_by().annotate(
-                # We need to use Func() to get Count() without GROUP BY - see https://stackoverflow.com/a/69031027
-                count=models.Func(F('id'), function='Count')
-            )
-            qs = qs.annotate(usage_count=models.Subquery(obj_tags.values('count')))
+            qs = qs.annotate(usage_count=RawSQL(RECURSIVE_TAG_COUNT_QUERY, []))
         return qs  # type: ignore[return-value]
 
     def add_tag(
