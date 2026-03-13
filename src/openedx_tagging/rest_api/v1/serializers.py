@@ -229,6 +229,7 @@ class TagDataSerializer(UserPermissionsSerializerMixin, serializers.Serializer):
     descendant_count = serializers.IntegerField()
     depth = serializers.IntegerField()
     parent_value = serializers.CharField(allow_null=True)
+    parent_id = serializers.IntegerField(allow_null=True)
     usage_count = serializers.IntegerField(required=False)
     # Internal database ID, if any. Generally should not be used; prefer 'value' which is unique within each taxonomy.
     # Free text taxonomies never have '_id' for their tags.
@@ -292,6 +293,7 @@ class TagDataSerializer(UserPermissionsSerializerMixin, serializers.Serializer):
         if isinstance(instance, Tag):
             data["_id"] = instance.pk  # The ID field won't otherwise be detected.
             data["parent_value"] = instance.parent.value if instance.parent else None
+            data["parent_id"] = instance.parent.id if instance.parent else None
         return data
 
 
