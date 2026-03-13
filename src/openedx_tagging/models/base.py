@@ -9,9 +9,9 @@ from typing import List
 from django.core import serializers
 from django.core.exceptions import ValidationError
 from django.db import models
-from django.db.models import F, Q, Value
+from django.db.models import Count, F, IntegerField, OuterRef, Q, Subquery, Value
 from django.db.models.expressions import RawSQL
-from django.db.models.functions import Concat, Lower
+from django.db.models.functions import Coalesce, Concat, Lower
 from django.utils.functional import cached_property
 from django.utils.module_loading import import_string
 from django.utils.translation import gettext_lazy as _
@@ -27,24 +27,6 @@ log = logging.getLogger(__name__)
 
 # Maximum depth allowed for a hierarchical taxonomy's tree of tags.
 TAXONOMY_MAX_DEPTH = 3
-
-RECURSIVE_TAG_COUNT_QUERY = '''
-    WITH RECURSIVE tag_lineage_by_usage AS (
-        -- Anchor
-        SELECT ott.value, ott.id, ott.parent_id
-        FROM oel_tagging_objecttag oto
-        JOIN oel_tagging_tag ott on oto.tag_id = ott.id
-        UNION ALL
-        -- recursion
-        SELECT ott.value, ott.id, ott.parent_id
-        FROM oel_tagging_tag ott
-        INNER JOIN tag_lineage_by_usage tlbu ON tlbu.parent_id = ott.id
-    )
-    SELECT COUNT(tlbu.id)
-    FROM tag_lineage_by_usage tlbu
-    WHERE tlbu.id = oel_tagging_tag.id
-    GROUP BY tlbu.id
-    '''
 
 # Ancestry of a given tag; the Tag.value fields of a given tag and its parents, starting from the root.
 # Will contain 0...TAXONOMY_MAX_DEPTH elements.
@@ -520,7 +502,7 @@ class Taxonomy(models.Model):
         qs = qs.values("value", "child_count", "descendant_count", "depth", "parent_value", "external_id", "_id")
         qs = qs.order_by("value")
         if include_counts:
-            qs = qs.annotate(usage_count=RawSQL(RECURSIVE_TAG_COUNT_QUERY, []))
+            qs = self.add_counts_query(qs)
         return qs  # type: ignore[return-value]
 
     def _get_filtered_tags_deep(
@@ -603,8 +585,42 @@ class Taxonomy(models.Model):
         qs = qs.values("value", "child_count", "descendant_count", "depth", "parent_value", "external_id", "_id")
         qs = qs.order_by("sort_key")
         if include_counts:
-            qs = qs.annotate(usage_count=RawSQL(RECURSIVE_TAG_COUNT_QUERY, []))
+            qs = self.add_counts_query(qs)
+
         return qs  # type: ignore[return-value]
+
+    def add_counts_query(self, qs: models.QuerySet ):
+        # Adds a subquery to the passed-in queryset that returns the number of times a tag has been used.
+        #
+        # Note: The count is not a simple count, we need to do a 'roll up' where we count the number of times a tag is
+        # directly used and applied, but then that also needs to add a "1" count to the lineage tags
+        # (parent, grandparent, etc.), but de-duplicate counts for any children so that if we have "2" child tags, it
+        # only counts towards "1" for the parent.
+        # This query gets the raw counts for each tag usage, gets the distinct usages (so de-duplicates counts) by
+        # actual application to an "Object" (library, course, course module, course section, etc.), which creates a
+        # count per tag, annotated to that particular tag from the passed-in queryset.
+        #
+        # Note: This only works with a tag lineage depth of "3", so if we need to adjust the depth of tags, this query
+        # will need to be adjusted.
+
+        usage_count_qs = ObjectTag.objects.filter(
+            Q(tag_id=OuterRef('pk')) |
+            Q(tag__parent_id=OuterRef('pk')) |
+            Q(tag__parent__parent_id=OuterRef('pk')) |
+            Q(tag__parent__parent__parent_id=OuterRef('pk'))
+        ).values('object_id').distinct().annotate(
+            intermediate_grouping=Value(1, output_field=IntegerField())
+        ).values('intermediate_grouping').annotate(
+            total_usage=Count('object_id', distinct=True)
+        ).values('total_usage')
+
+        qs = qs.annotate(
+            usage_count=Coalesce(
+                Subquery(usage_count_qs, output_field=IntegerField()),
+                0  # Coalesce ensures we return 0 instead of None if there are no usages
+            )
+        )
+        return qs
 
     def add_tag(
         self,
