@@ -6,11 +6,9 @@ from __future__ import annotations
 import logging
 import re
 from typing import List
-from django.core import serializers
 from django.core.exceptions import ValidationError
 from django.db import models
 from django.db.models import Count, F, IntegerField, OuterRef, Q, Subquery, Value
-from django.db.models.expressions import RawSQL
 from django.db.models.functions import Coalesce, Concat, Lower
 from django.utils.functional import cached_property
 from django.utils.module_loading import import_string
@@ -590,18 +588,23 @@ class Taxonomy(models.Model):
         return qs  # type: ignore[return-value]
 
     def add_counts_query(self, qs: models.QuerySet ):
-        # Adds a subquery to the passed-in queryset that returns the number of times a tag has been used.
+        # Adds a subquery to the passed-in queryset that returns the number
+        # of times a tag has been used.
         #
-        # Note: The count is not a simple count, we need to do a 'roll up' where we count the number of times a tag is
-        # directly used and applied, but then that also needs to add a "1" count to the lineage tags
-        # (parent, grandparent, etc.), but de-duplicate counts for any children so that if we have "2" child tags, it
-        # only counts towards "1" for the parent.
-        # This query gets the raw counts for each tag usage, gets the distinct usages (so de-duplicates counts) by
-        # actual application to an "Object" (library, course, course module, course section, etc.), which creates a
-        # count per tag, annotated to that particular tag from the passed-in queryset.
+        # Note: The count is not a simple count, we need to do a 'roll up'
+        # where we count the number of times a tag is directly used and applied,
+        # but then that also needs to add a "1" count to the lineage tags
+        # (parent, grandparent, etc.), but de-duplicate counts for any children
+        # so that if we have "2" child tags, it only counts towards "1" for the
+        # parent.
+        # This query gets the raw counts for each tag usage, gets the distinct
+        # usages (so de-duplicates counts) by actual application to an "Object"
+        # (library, course, course module, course section, etc.), which creates
+        # a count per tag, annotated to that particular tag from the passed-in
+        # queryset.
         #
-        # Note: This only works with a tag lineage depth of "3", so if we need to adjust the depth of tags, this query
-        # will need to be adjusted.
+        # Note: This only works with a tag lineage depth of "3", so if we need
+        # to adjust the depth of tags, this query will need to be adjusted.
 
         usage_count_qs = ObjectTag.objects.filter(
             Q(tag_id=OuterRef('pk')) |
