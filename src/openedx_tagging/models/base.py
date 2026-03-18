@@ -24,6 +24,8 @@ log = logging.getLogger(__name__)
 
 
 # Maximum depth allowed for a hierarchical taxonomy's tree of tags.
+# Note: if this changes please check logic in this file for notes
+# about necessary changes
 TAXONOMY_MAX_DEPTH = 3
 
 # Ancestry of a given tag; the Tag.value fields of a given tag and its parents, starting from the root.
@@ -603,9 +605,11 @@ class Taxonomy(models.Model):
         # a count per tag, annotated to that particular tag from the passed-in
         # queryset.
         #
-        # Note: This only works with a tag lineage depth of "3", so if we need
-        # to adjust the depth of tags, this query will need to be adjusted.
+        # Note: This only works with a tag lineage depth of "3" (the now
+        # current value of TAXONOMY_MAX_DEPTH), inclusive of 0, so 0...3
+        # if we change TAXONOMY_MAX_DEPTH this code will need to be updated.
 
+        assert TAXONOMY_MAX_DEPTH == 3  # If we change TAXONOMY_MAX_DEPTH we need to change this query code
         usage_count_qs = ObjectTag.objects.filter(
             Q(tag_id=OuterRef('pk')) |
             Q(tag__parent_id=OuterRef('pk')) |

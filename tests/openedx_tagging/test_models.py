@@ -546,7 +546,7 @@ class TestFilteredTagsClosedTaxonomy(TestTagTaxonomyMixin, TestCase):
         """
         Test that the usage count in the results is right for a basic case;
         many objects tagged seperately should return a simple usage count that
-        reflects lineage de-duplication (or lack thereof, in this case_
+        reflects lineage de-duplication (or lack thereof, in this case)
         """
         api.tag_object(object_id="obj01", taxonomy=self.taxonomy, tags=["Bacteria"])
         api.tag_object(object_id="obj02", taxonomy=self.taxonomy, tags=["Bacteria"])
