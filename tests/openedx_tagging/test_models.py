@@ -1,6 +1,7 @@
 """
 Test the tagging base models
 """
+
 from __future__ import annotations
 
 import ddt  # type: ignore[import]
@@ -50,6 +51,7 @@ class TestTagTaxonomyMixin:
         self.chordata = get_tag("Chordata")
         self.mammalia = get_tag("Mammalia")
         self.animalia = get_tag("Animalia")
+        self.eukaryota = get_tag("Eukaryota")
         self.system_taxonomy_tag = get_tag("System Tag 1")
         self.english_tag = self.language_taxonomy.tag_for_external_id("en")
         self.user_1 = get_user_model()(
@@ -417,12 +419,12 @@ class TestFilteredTagsClosedTaxonomy(TestTagTaxonomyMixin, TestCase):
             self.test_get_root()
         with self.assertNumQueries(1):
             self.test_get_depth_1_search_term()
-        # When listing the tags below a specific tag, there is one additional query to load each ancestor tag:
+        # When listing the tags below a specific tag, there is one additional query to load the parent tag:
         with self.assertNumQueries(2):
             self.test_get_child_tags_one_level()
         with self.assertNumQueries(2):
             self.test_get_depth_1_child_search_term()
-        with self.assertNumQueries(3):
+        with self.assertNumQueries(2):
             self.test_get_grandchild_tags_one_level()
 
     ##################
@@ -443,7 +445,8 @@ class TestFilteredTagsClosedTaxonomy(TestTagTaxonomyMixin, TestCase):
             "Eukaryota (None) (children: 5 + 8)",
             "  Animalia (Eukaryota) (children: 7 + 1)",
             "    Arthropoda (Animalia) (children: 0)",
-            "    Chordata (Animalia) (children: 1)",  # note this has a child but the child is not included
+            "    Chordata (Animalia) (children: 1)",
+            "      Mammalia (Chordata) (children: 0)",
             "    Cnidaria (Animalia) (children: 0)",
             "    Ctenophora (Animalia) (children: 0)",
             "    Gastrotrich (Animalia) (children: 0)",
@@ -543,7 +546,9 @@ class TestFilteredTagsClosedTaxonomy(TestTagTaxonomyMixin, TestCase):
 
     def test_usage_count(self) -> None:
         """
-        Test that the usage count in the results is right
+        Test that the usage count in the results is right for a basic case;
+        many objects tagged seperately should return a simple usage count that
+        reflects lineage de-duplication (or lack thereof, in this case)
         """
         api.tag_object(object_id="obj01", taxonomy=self.taxonomy, tags=["Bacteria"])
         api.tag_object(object_id="obj02", taxonomy=self.taxonomy, tags=["Bacteria"])
@@ -552,7 +557,7 @@ class TestFilteredTagsClosedTaxonomy(TestTagTaxonomyMixin, TestCase):
         # Now the API should reflect these usage counts:
         result = pretty_format_tags(self.taxonomy.get_filtered_tags(search_term="bacteria", include_counts=True))
         assert result == [
-            "Bacteria (None) (used: 3, children: 2)",
+            "Bacteria (None) (used: 4, children: 2)",
             "  Archaebacteria (Bacteria) (used: 0, children: 0)",
             "  Eubacteria (Bacteria) (used: 1, children: 0)",
         ]
@@ -561,7 +566,226 @@ class TestFilteredTagsClosedTaxonomy(TestTagTaxonomyMixin, TestCase):
             self.taxonomy.get_filtered_tags(search_term="bacteria", include_counts=True, depth=1)
         )
         assert result1 == [
-            "Bacteria (None) (used: 3, children: 2)",
+            "Bacteria (None) (used: 4, children: 2)",
+        ]
+
+    def test_usage_count_lineage_count_across_same_course(self) -> None:
+        """
+        Test that the usage count is correct and parent counts are included based on
+        child tags being added to an object. However, we de-duplicate and only count
+        1 parent tag towards a course even if 2 children are applied to that course
+        """
+        api.tag_object(object_id="obj01", taxonomy=self.taxonomy, tags=["Bacteria"])
+        api.tag_object(object_id="obj01", taxonomy=self.taxonomy, tags=["Archaebacteria"])
+        api.tag_object(object_id="obj02", taxonomy=self.taxonomy, tags=["Archaebacteria"])
+        api.tag_object(object_id="obj01", taxonomy=self.taxonomy, tags=["Eubacteria"])
+        # Now the API should reflect these usage counts:
+        result = pretty_format_tags(self.taxonomy.get_filtered_tags(search_term="bacteria", include_counts=True))
+        assert result == [
+            "Bacteria (None) (used: 2, children: 2)",
+            "  Archaebacteria (Bacteria) (used: 1, children: 0)",
+            "  Eubacteria (Bacteria) (used: 1, children: 0)",
+        ]
+        # Same with depth=1, which uses a different query internally:
+        result1 = pretty_format_tags(
+            self.taxonomy.get_filtered_tags(search_term="bacteria", include_counts=True, depth=1)
+        )
+        assert result1 == [
+            "Bacteria (None) (used: 2, children: 2)",
+        ]
+
+    def test_usage_count_rolls_up_to_ancestors_deep(self) -> None:
+        """
+        AI/Claude4.6 generated via IntelliJ IDEA AI Assistant
+        When a child tag (depth 3) is applied to an object, it should
+        roll up the count to all its ancestors when using _get_filtered_tags_deep.
+        The child tag and each of its ancestors should have usage_count=1.
+        """
+        api.tag_object("obj:1", self.taxonomy, [self.mammalia.value])
+        result = pretty_format_tags(self.taxonomy.get_filtered_tags(include_counts=True))
+        assert result == [
+            "Archaea (None) (used: 0, children: 3)",
+            "  DPANN (Archaea) (used: 0, children: 0)",
+            "  Euryarchaeida (Archaea) (used: 0, children: 0)",
+            "  Proteoarchaeota (Archaea) (used: 0, children: 0)",
+            "Bacteria (None) (used: 0, children: 2)",
+            "  Archaebacteria (Bacteria) (used: 0, children: 0)",
+            "  Eubacteria (Bacteria) (used: 0, children: 0)",
+            "Eukaryota (None) (used: 1, children: 5 + 8)",
+            "  Animalia (Eukaryota) (used: 1, children: 7 + 1)",
+            "    Arthropoda (Animalia) (used: 0, children: 0)",
+            "    Chordata (Animalia) (used: 1, children: 1)",
+            "      Mammalia (Chordata) (used: 1, children: 0)",
+            "    Cnidaria (Animalia) (used: 0, children: 0)",
+            "    Ctenophora (Animalia) (used: 0, children: 0)",
+            "    Gastrotrich (Animalia) (used: 0, children: 0)",
+            "    Placozoa (Animalia) (used: 0, children: 0)",
+            "    Porifera (Animalia) (used: 0, children: 0)",
+            "  Fungi (Eukaryota) (used: 0, children: 0)",
+            "  Monera (Eukaryota) (used: 0, children: 0)",
+            "  Plantae (Eukaryota) (used: 0, children: 0)",
+            "  Protista (Eukaryota) (used: 0, children: 0)",
+        ]
+
+    def test_usage_count_multiple_objects_same_tag_deep(self) -> None:
+        """
+        AI/Claude4.6 generated via IntelliJ IDEA AI Assistant
+        When two distinct objects (e.g. seperate courses, modules, etc.) are tagged
+        with the same child tag, it should count 2 for that tag (and roll up 2
+        to ancestors). Each distinct object should contribute exactly 1 to the count.
+        """
+        api.tag_object("obj:1", self.taxonomy, [self.chordata.value])
+        api.tag_object("obj:2", self.taxonomy, [self.chordata.value])
+        result = pretty_format_tags(
+            self.taxonomy.get_filtered_tags(search_term="chordata", include_counts=True)
+        )
+        assert result == [
+            "Eukaryota (None) (used: 2, children: 1 + 1)",
+            "  Animalia (Eukaryota) (used: 2, children: 1)",
+            "    Chordata (Animalia) (used: 2, children: 0)",
+        ]
+
+    def test_usage_count_sibling_tags_same_object_deduplication_deep(self) -> None:
+        """
+        AI/Claude4.6 generated via IntelliJ IDEA AI Assistant
+        When one object is tagged with two sibling tags (both children of the same
+        parent), the parent's usage_count should be 1, not 2. It should de-duplicate.
+        """
+        self.taxonomy.allow_multiple = True
+        self.taxonomy.save()
+        # Eubacteria and Archaebacteria are both children of Bacteria
+        api.tag_object("obj:1", self.taxonomy, [self.eubacteria.value, self.archaebacteria.value])
+        result = pretty_format_tags(
+            self.taxonomy.get_filtered_tags(search_term="bacteria", include_counts=True)
+        )
+        assert result == [
+            "Bacteria (None) (used: 1, children: 2)",
+            "  Archaebacteria (Bacteria) (used: 1, children: 0)",
+            "  Eubacteria (Bacteria) (used: 1, children: 0)",
+        ]
+
+    def test_usage_count_sibling_tags_different_objects_deep(self) -> None:
+        """
+        AI/Claude4.6 generated via IntelliJ IDEA AI Assistant
+        When two different objects are each tagged with a different sibling tag,
+        the parent's usage_count should be 2, not 1.
+        """
+        api.tag_object("obj:1", self.taxonomy, [self.eubacteria.value])
+        api.tag_object("obj:2", self.taxonomy, [self.archaebacteria.value])
+        result = pretty_format_tags(
+            self.taxonomy.get_filtered_tags(search_term="bacteria", include_counts=True)
+        )
+        assert result == [
+            "Bacteria (None) (used: 2, children: 2)",
+            "  Archaebacteria (Bacteria) (used: 1, children: 0)",
+            "  Eubacteria (Bacteria) (used: 1, children: 0)",
+        ]
+
+    def test_usage_count_one_level_root_tags(self) -> None:
+        """
+        AI/Claude4.6 generated via IntelliJ IDEA AI Assistant
+        _get_filtered_tags_one_level (depth=1) with include_counts=True should
+        reflect the rolled-up usage count, not just direct usage.
+        Tagging an object with a child tag should increment the root tag's count.
+        """
+        api.tag_object("obj:1", self.taxonomy, [self.eubacteria.value])  # child of Bacteria
+        result = pretty_format_tags(
+            self.taxonomy.get_filtered_tags(depth=1, include_counts=True)
+        )
+        assert result == [
+            "Archaea (None) (used: 0, children: 3)",
+            "Bacteria (None) (used: 1, children: 2)",
+            "Eukaryota (None) (used: 0, children: 5 + 8)",
+        ]
+
+    def test_usage_count_one_level_child_tags(self) -> None:
+        """
+        AI/Claude4.6 generated via IntelliJ IDEA AI Assistant
+        When listing children of a tag (depth=1, parent_tag_value=...), the
+        usage_count of each child should only reflect the objects tagged with
+        that child or any of its descendants.
+        """
+        api.tag_object("obj:1", self.taxonomy, [self.mammalia.value])  # grandchild of Animalia via Chordata
+        api.tag_object("obj:2", self.taxonomy, [self.chordata.value])  # direct child of Animalia
+        result = pretty_format_tags(
+            self.taxonomy.get_filtered_tags(depth=1, parent_tag_value="Animalia", include_counts=True)
+        )
+        assert result == [
+            "    Arthropoda (Animalia) (used: 0, children: 0)",
+            "    Chordata (Animalia) (used: 2, children: 1)",
+            "    Cnidaria (Animalia) (used: 0, children: 0)",
+            "    Ctenophora (Animalia) (used: 0, children: 0)",
+            "    Gastrotrich (Animalia) (used: 0, children: 0)",
+            "    Placozoa (Animalia) (used: 0, children: 0)",
+            "    Porifera (Animalia) (used: 0, children: 0)",
+        ]
+
+    def test_usage_count_three_levels_deep_rollup(self) -> None:
+        """
+        AI/Claude4.6 generated via IntelliJ IDEA AI Assistant
+        Tagging an object with a depth-3 tag (Chordata) should roll up
+        to grandparent (Animalia) and great-grandparent (Eukaryota),
+        verifying the full 3-level lineage query in add_counts_query.
+        """
+        api.tag_object("obj:1", self.taxonomy, [self.animalia.value])
+        api.tag_object("obj:1", self.taxonomy, [self.chordata.value])
+        result = pretty_format_tags(
+            self.taxonomy.get_filtered_tags(search_term="chordata", include_counts=True)
+        )
+        assert result == [
+            "Eukaryota (None) (used: 1, children: 1 + 1)",
+            "  Animalia (Eukaryota) (used: 1, children: 1)",
+            "    Chordata (Animalia) (used: 1, children: 0)",
+        ]
+
+    def test_usage_count_returns_zero_not_none_deep(self) -> None:
+        """
+        AI/Claude4.6 generated via IntelliJ IDEA AI Assistant
+        When no object has been tagged with a tag or any of its
+        descendants, usage_count must be 0 (integer), not None.
+        """
+        result = pretty_format_tags(self.taxonomy.get_filtered_tags(include_counts=True))
+        assert result == [
+            "Archaea (None) (used: 0, children: 3)",
+            "  DPANN (Archaea) (used: 0, children: 0)",
+            "  Euryarchaeida (Archaea) (used: 0, children: 0)",
+            "  Proteoarchaeota (Archaea) (used: 0, children: 0)",
+            "Bacteria (None) (used: 0, children: 2)",
+            "  Archaebacteria (Bacteria) (used: 0, children: 0)",
+            "  Eubacteria (Bacteria) (used: 0, children: 0)",
+            "Eukaryota (None) (used: 0, children: 5 + 8)",
+            "  Animalia (Eukaryota) (used: 0, children: 7 + 1)",
+            "    Arthropoda (Animalia) (used: 0, children: 0)",
+            "    Chordata (Animalia) (used: 0, children: 1)",
+            "      Mammalia (Chordata) (used: 0, children: 0)",
+            "    Cnidaria (Animalia) (used: 0, children: 0)",
+            "    Ctenophora (Animalia) (used: 0, children: 0)",
+            "    Gastrotrich (Animalia) (used: 0, children: 0)",
+            "    Placozoa (Animalia) (used: 0, children: 0)",
+            "    Porifera (Animalia) (used: 0, children: 0)",
+            "  Fungi (Eukaryota) (used: 0, children: 0)",
+            "  Monera (Eukaryota) (used: 0, children: 0)",
+            "  Plantae (Eukaryota) (used: 0, children: 0)",
+            "  Protista (Eukaryota) (used: 0, children: 0)",
+        ]
+
+    def test_usage_count_with_search_term_deep(self) -> None:
+        """
+        AI/Claude4.6 generated via IntelliJ IDEA AI Assistant
+        When using get_filtered_tags() with both a search_term and
+        include_counts=True, the usage_count returned should still
+        reflect the true count for each matching tag, not be affected
+        by the search filter.
+        """
+        api.tag_object("obj:1", self.taxonomy, [self.eubacteria.value])
+        api.tag_object("obj:2", self.taxonomy, [self.archaebacteria.value])
+        result = pretty_format_tags(
+            self.taxonomy.get_filtered_tags(search_term="bacteria", include_counts=True)
+        )
+        assert result == [
+            "Bacteria (None) (used: 2, children: 2)",
+            "  Archaebacteria (Bacteria) (used: 1, children: 0)",
+            "  Eubacteria (Bacteria) (used: 1, children: 0)",
         ]
 
     def test_tree_sort(self) -> None:
@@ -622,6 +846,12 @@ class TestFilteredTagsClosedTaxonomy(TestTagTaxonomyMixin, TestCase):
             "Interests (None) (used: 0, children: 1 + 7)",
             "  Holland Codes (Interests) (used: 0, children: 1 + 6)",
             "    Interests - Holland Codes (Holland Codes) (used: 0, children: 6)",
+            "      Artistic (Interests - Holland Codes) (used: 0, children: 0)",
+            "      Conventional (Interests - Holland Codes) (used: 0, children: 0)",
+            "      Enterprising (Interests - Holland Codes) (used: 0, children: 0)",
+            "      Investigative (Interests - Holland Codes) (used: 0, children: 0)",
+            "      Realistic (Interests - Holland Codes) (used: 0, children: 0)",
+            "      Social (Interests - Holland Codes) (used: 0, children: 0)",
         ]
 
 
@@ -905,3 +1135,263 @@ class TestObjectTag(TestTagTaxonomyMixin, TestCase):
             (self.archaea.value, False),
             (self.bacteria.value, True),  # <--- deleted! But the value is preserved.
         ]
+
+
+class TestTagLineage(TestCase):
+    """
+    Test the Tag.lineage field, which stores the full tab-separated ancestor
+    path including the tag itself: "Root\tParent\t...\tThisValue\t".
+
+    The tree used throughout this class:
+
+        Charlie                  (depth 0)
+            Alice                (depth 1)
+                Delta            (depth 2)
+                    Echo         (depth 3)
+                        Foxtrot  (depth 4)
+            Bob                  (depth 1)
+        Danielle                 (depth 0)
+    """
+
+    def setUp(self):
+        taxonomy = api.create_taxonomy("Test TagLineage")
+        self.charlie = Tag.objects.create(taxonomy=taxonomy, value="Charlie")
+        self.alice = Tag.objects.create(taxonomy=taxonomy, value="Alice", parent=self.charlie)
+        self.bob = Tag.objects.create(taxonomy=taxonomy, value="Bob", parent=self.charlie)
+        self.delta = Tag.objects.create(taxonomy=taxonomy, value="Delta", parent=self.alice)
+        self.echo = Tag.objects.create(taxonomy=taxonomy, value="Echo", parent=self.delta)
+        self.foxtrot = Tag.objects.create(taxonomy=taxonomy, value="Foxtrot", parent=self.echo)
+        self.danielle = Tag.objects.create(taxonomy=taxonomy, value="Danielle")
+
+    def test_root_tag(self):
+        assert self.charlie.lineage == "Charlie\t"
+
+    def test_depth_1(self):
+        assert self.alice.lineage == "Charlie\tAlice\t"
+
+    def test_depth_2(self):
+        assert self.delta.lineage == "Charlie\tAlice\tDelta\t"
+
+    def test_depth_3(self):
+        assert self.echo.lineage == "Charlie\tAlice\tDelta\tEcho\t"
+
+    def test_depth_4(self):
+        assert self.foxtrot.lineage == "Charlie\tAlice\tDelta\tEcho\tFoxtrot\t"
+
+    def test_second_root(self):
+        assert self.danielle.lineage == "Danielle\t"
+
+    def test_tree_sort_order(self):
+        """
+        Tags ordered by lineage come out in depth-first tree order:
+        each parent immediately before its subtree, siblings alphabetically.
+        Because lineage uses a case-insensitive collation, the sort matches
+        what the old LOWER(sort_key) CTE produced.
+        """
+        tags = Tag.objects.filter(
+            pk__in=[
+                self.charlie.pk,
+                self.alice.pk,
+                self.bob.pk,
+                self.delta.pk,
+                self.echo.pk,
+                self.foxtrot.pk,
+                self.danielle.pk,
+            ]
+        ).order_by("lineage")
+        # fmt: off
+        assert [t.value for t in tags] == [
+            "Charlie",   # Charlie\t
+            "Alice",     # Charlie\tAlice\t
+            "Delta",     # Charlie\tAlice\tDelta\t
+            "Echo",      # Charlie\tAlice\tDelta\tEcho\t
+            "Foxtrot",   # Charlie\tAlice\tDelta\tEcho\tFoxtrot\t
+            "Bob",       # Charlie\tBob\t  (after Alice's entire subtree)
+            "Danielle",  # Danielle\t
+        ]
+        # fmt: on
+
+    def _refresh_all(self):
+        """Refresh all tags from the database."""
+        self.charlie.refresh_from_db()
+        self.alice.refresh_from_db()
+        self.bob.refresh_from_db()
+        self.delta.refresh_from_db()
+        self.echo.refresh_from_db()
+        self.foxtrot.refresh_from_db()
+        self.danielle.refresh_from_db()
+
+    def test_reparent_to_lower_depth(self):
+        """
+        Moving a tag to a deeper location updates its depth and lineage,
+        and cascades to all its descendants.
+
+        Before: Charlie -> Alice -> Delta -> Echo -> Foxtrot
+        After:  Charlie -> Bob -> Alice -> Delta -> Echo -> Foxtrot
+                (Alice moves from depth 1 to depth 2, all descendants shift +1)
+        """
+        self.alice.parent = self.bob
+        self.alice.save()
+        self._refresh_all()
+
+        assert self.alice.depth == 2
+        assert self.alice.lineage == "Charlie\tBob\tAlice\t"
+
+        assert self.delta.depth == 3
+        assert self.delta.lineage == "Charlie\tBob\tAlice\tDelta\t"
+
+        assert self.echo.depth == 4
+        assert self.echo.lineage == "Charlie\tBob\tAlice\tDelta\tEcho\t"
+
+        assert self.foxtrot.depth == 5
+        assert self.foxtrot.lineage == "Charlie\tBob\tAlice\tDelta\tEcho\tFoxtrot\t"
+
+        # Bob's depth should be unchanged
+        assert self.bob.depth == 1
+        assert self.bob.lineage == "Charlie\tBob\t"
+
+    def test_reparent_to_higher_depth(self):
+        """
+        Moving a tag to a shallower location updates its depth and lineage,
+        and cascades to all its descendants.
+
+        Before: Charlie -> Alice -> Delta -> Echo -> Foxtrot
+        After:  Charlie -> Delta -> Echo -> Foxtrot
+                (Delta moves from depth 2 to depth 1, all descendants shift -1)
+        """
+        self.delta.parent = self.charlie
+        self.delta.save()
+        self._refresh_all()
+
+        assert self.delta.depth == 1
+        assert self.delta.lineage == "Charlie\tDelta\t"
+
+        assert self.echo.depth == 2
+        assert self.echo.lineage == "Charlie\tDelta\tEcho\t"
+
+        assert self.foxtrot.depth == 3
+        assert self.foxtrot.lineage == "Charlie\tDelta\tEcho\tFoxtrot\t"
+
+        # Alice should be unaffected
+        assert self.alice.depth == 1
+        assert self.alice.lineage == "Charlie\tAlice\t"
+
+    def test_reparent_to_equal_depth(self):
+        """
+        Moving a tag (Delta) to a different parent at the same depth updates its
+        lineage but leaves depths unchanged.
+
+        Before: Charlie -> Alice -> Delta -> Echo -> Foxtrot
+                Charlie -> Bob
+
+        After:  Charlie -> Alice
+                Charlie -> Bob -> Delta -> Echo -> Foxtrot
+
+                (Delta moves from Alice to Bob, same depth 2)
+        """
+        self.delta.parent = self.bob
+        self.delta.save()
+        self._refresh_all()
+
+        assert self.delta.depth == 2
+        assert self.delta.lineage == "Charlie\tBob\tDelta\t"
+
+        assert self.echo.depth == 3
+        assert self.echo.lineage == "Charlie\tBob\tDelta\tEcho\t"
+
+        assert self.foxtrot.depth == 4
+        assert self.foxtrot.lineage == "Charlie\tBob\tDelta\tEcho\tFoxtrot\t"
+
+        # Alice should be unaffected
+        assert self.alice.depth == 1
+        assert self.alice.lineage == "Charlie\tAlice\t"
+
+    def test_reparent_to_different_root(self):
+        """
+        Moving a tag (Alice) to a parent under a completely different root
+        updates the full lineage prefix for the tag and all its descendants.
+
+        Before: Charlie -> Alice -> Delta -> Echo -> Foxtrot
+                Danielle
+        After:  Danielle -> Alice -> Delta -> Echo -> Foxtrot
+                Charlie
+        """
+        self.alice.parent = self.danielle
+        self.alice.save()
+        self._refresh_all()
+
+        assert self.alice.depth == 1
+        assert self.alice.lineage == "Danielle\tAlice\t"
+
+        assert self.delta.depth == 2
+        assert self.delta.lineage == "Danielle\tAlice\tDelta\t"
+
+        assert self.echo.depth == 3
+        assert self.echo.lineage == "Danielle\tAlice\tDelta\tEcho\t"
+
+        assert self.foxtrot.depth == 4
+        assert self.foxtrot.lineage == "Danielle\tAlice\tDelta\tEcho\tFoxtrot\t"
+
+        # Charlie is now childless but unchanged
+        assert self.charlie.depth == 0
+        assert self.charlie.lineage == "Charlie\t"
+
+    def test_reparent_to_root(self):
+        """
+        Moving a child tag (Alice) to the root (no parent) updates depth to 0
+        and removes all ancestor prefixes from its lineage and those of its
+        descendants.
+
+        Before: Charlie -> Alice -> Delta -> Echo -> Foxtrot
+        After:  Alice -> Delta -> Echo -> Foxtrot  (Alice becomes a root tag)
+        """
+        self.alice.parent = None
+        self.alice.save()
+        self._refresh_all()
+
+        assert self.alice.depth == 0
+        assert self.alice.lineage == "Alice\t"
+
+        assert self.delta.depth == 1
+        assert self.delta.lineage == "Alice\tDelta\t"
+
+        assert self.echo.depth == 2
+        assert self.echo.lineage == "Alice\tDelta\tEcho\t"
+
+        assert self.foxtrot.depth == 3
+        assert self.foxtrot.lineage == "Alice\tDelta\tEcho\tFoxtrot\t"
+
+        # Charlie and Bob are unaffected
+        assert self.charlie.depth == 0
+        assert self.charlie.lineage == "Charlie\t"
+        assert self.bob.depth == 1
+        assert self.bob.lineage == "Charlie\tBob\t"
+
+    def test_rename(self):
+        """
+        Renaming a tag updates its own lineage and cascades to all descendants.
+
+        Before: Charlie -> Alice    -> Delta -> Echo -> Foxtrot
+        After:  Charlie -> Alicia✨ -> Delta -> Echo -> Foxtrot
+        """
+        self.alice.value = "Alicia"
+        self.alice.save()
+        self._refresh_all()
+
+        assert self.alice.depth == 1
+        assert self.alice.lineage == "Charlie\tAlicia\t"
+
+        assert self.delta.depth == 2
+        assert self.delta.lineage == "Charlie\tAlicia\tDelta\t"
+
+        assert self.echo.depth == 3
+        assert self.echo.lineage == "Charlie\tAlicia\tDelta\tEcho\t"
+
+        assert self.foxtrot.depth == 4
+        assert self.foxtrot.lineage == "Charlie\tAlicia\tDelta\tEcho\tFoxtrot\t"
+
+        # Unrelated tags are unaffected
+        assert self.charlie.depth == 0
+        assert self.charlie.lineage == "Charlie\t"
+        assert self.bob.depth == 1
+        assert self.bob.lineage == "Charlie\tBob\t"
