@@ -642,6 +642,13 @@ class Taxonomy(models.Model):
         return qs  # type: ignore[return-value]
 
     def add_counts_query(self, qs: models.QuerySet ):
+        """
+        Adds a subquery to the passed-in queryset that returns the usage_count
+        for a given tag, or the appropriate count with de-deuplication per Object
+        for the parents of a used child tag
+        :param qs: The QuerySet to annotate with usage counts.
+        :return: the queryset annotated with the usage counts
+        """
         # Adds a subquery to the passed-in queryset that returns the number
         # of times a tag has been used.
         #
@@ -661,7 +668,7 @@ class Taxonomy(models.Model):
         # build a list of lineage paths to be used in the query, so we're not hard coding to
         # a certain number of levels. This will build an array containing something like:
         # ['tag_id', 'tag__parent_id', 'tag__parent__parent_id', 'tag__parent__parent__parent_id', ...]
-        lineage_paths = [f"tag{'__parent' * i}_id" for i in range(0, TAXONOMY_MAX_DEPTH+1)]
+        lineage_paths = [f"tag{'__parent' * i}_id" for i in range(TAXONOMY_MAX_DEPTH+1)]
 
         # Combine the above-built lineage with a Q query against the OuterRef("pk"),
         lineage_query_list = [Q(**{path: models.OuterRef("pk")}) for path in lineage_paths]
