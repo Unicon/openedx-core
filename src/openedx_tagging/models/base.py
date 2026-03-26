@@ -5,13 +5,15 @@ Tagging app base data models
 from __future__ import annotations
 
 import logging
+import operator
 import re
+from functools import reduce
 from typing import List, Self
 
 from django.core.exceptions import ValidationError
 from django.db import models
-from django.db.models import Count, F, IntegerField, OuterRef, Q, Subquery, Value
-from django.db.models.functions import Coalesce, Concat, Lower
+from django.db.models import Count, F, IntegerField, Q, Subquery, Value
+from django.db.models.functions import Coalesce, Concat, Length, Replace, Substr
 from django.utils.functional import cached_property
 from django.utils.module_loading import import_string
 from django.utils.translation import gettext_lazy as _
@@ -654,17 +656,30 @@ class Taxonomy(models.Model):
         # (library, course, course module, course section, etc.), which creates
         # a count per tag, annotated to that particular tag from the passed-in
         # queryset.
-        #
-        # Note: This only works with a tag lineage depth of "3" (the now
-        # current value of TAXONOMY_MAX_DEPTH), inclusive of 0, so 0...3
-        # if we change TAXONOMY_MAX_DEPTH this code will need to be updated.
 
-        assert TAXONOMY_MAX_DEPTH == 3  # If we change TAXONOMY_MAX_DEPTH we need to change this query code
+        # Since Depth may change depending on the value of TAXONOMY_MAX_DEPTH, dynamically
+        # build a list of lineage paths to be used in the query, so we're not hard coding to
+        # a certain number of levels. This will build an array containing something like:
+        # ['tag_id', 'tag__parent_id', 'tag__parent__parent_id', 'tag__parent__parent__parent_id', ...]
+        lineage_paths = [f"tag{'__parent' * i}_id" for i in range(0, TAXONOMY_MAX_DEPTH+1)]
+
+        # Combine the above-built lineage with a Q query against the OuterRef("pk"),
+        lineage_query_list = [Q(**{path: models.OuterRef("pk")}) for path in lineage_paths]
+
         usage_count_qs = ObjectTag.objects.filter(
-            Q(tag_id=OuterRef('pk')) |
-            Q(tag__parent_id=OuterRef('pk')) |
-            Q(tag__parent__parent_id=OuterRef('pk')) |
-            Q(tag__parent__parent__parent_id=OuterRef('pk'))
+            # Combine the logic built above with an or operator to flesh out a
+            # lineage query of the form:
+            # ```
+            #   Q(tag_id=OuterRef('pk')) |
+            #   Q(tag__parent_id=OuterRef('pk')) |
+            #   Q(tag__parent__parent_id=OuterRef('pk')) |
+            #   ...
+            # ```
+            # Previously the above was hard coded and needed to be changed with every
+            # change in TAXONOMY_MAX_DEPTH, now it is dynamic to reduce maintenace
+            # (Thanks Google for helping me build this)
+
+            reduce(operator.or_, lineage_query_list)
         ).values('object_id').distinct().annotate(
             intermediate_grouping=Value(1, output_field=IntegerField())
         ).values('intermediate_grouping').annotate(
