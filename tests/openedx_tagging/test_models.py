@@ -788,7 +788,6 @@ class TestFilteredTagsClosedTaxonomy(TestTagTaxonomyMixin, TestCase):
             "  Eubacteria (Bacteria) (used: 1, children: 0)",
         ]
 
-
     def test_tree_sort(self) -> None:
         """
         Verify that taxonomies can be sorted correctly in tree orer (case insensitive).
