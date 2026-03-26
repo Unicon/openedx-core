@@ -641,7 +641,7 @@ class Taxonomy(models.Model):
 
         return qs  # type: ignore[return-value]
 
-    def add_counts_query(self, qs: models.QuerySet ):
+    def add_counts_query(self, qs: models.QuerySet):
         """
         Adds a subquery to the passed-in queryset that returns the usage_count
         for a given tag, or the appropriate count with de-deuplication per Object
