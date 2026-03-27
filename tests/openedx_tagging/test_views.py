@@ -1614,7 +1614,8 @@ class TestTaxonomyTagsView(TestTaxonomyViewMixin):
         self.client.force_authenticate(user=self.staff)
 
         url = self.large_taxonomy_url + "?include_counts"
-        with self.assertNumQueries(3):
+        # 4 queries, including 1 for max depth for counts
+        with self.assertNumQueries(4):
             response = self.client.get(url)
 
         assert response.status_code == status.HTTP_200_OK

@@ -665,11 +665,12 @@ class Taxonomy(models.Model):
         # a count per tag, annotated to that particular tag from the passed-in
         # queryset.
 
-        # Since Depth may change depending on the value of TAXONOMY_MAX_DEPTH, dynamically
-        # build a list of lineage paths to be used in the query, so we're not hard coding to
-        # a certain number of levels. This will build an array containing something like:
+        # Since Depth may be variable based on the taxonomy, we dynamically build
+        # a list of lineage paths to be used in the query, so we're not hard coding to
+        # a certain number of levels. This will query for the max depth, then build
+        # an array containing something like:
         # ['tag_id', 'tag__parent_id', 'tag__parent__parent_id', 'tag__parent__parent__parent_id', ...]
-        max_depth = qs.aggregate(models.Max("depth", default=0))["depth__max"]
+        max_depth = Tag.objects.aggregate(models.Max("depth", default=0))["depth__max"]
         lineage_paths = [f"tag{'__parent' * i}_id" for i in range(max_depth + 1)]
 
         # Combine the above-built lineage with a Q query against the OuterRef("pk"),

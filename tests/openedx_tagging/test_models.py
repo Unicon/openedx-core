@@ -417,10 +417,12 @@ class TestFilteredTagsClosedTaxonomy(TestTagTaxonomyMixin, TestCase):
         """
         with self.assertNumQueries(1):
             self.test_get_root()
-        with self.assertNumQueries(1):
+
+        # 2 queries including a query to get the max depth for tag counts
+        with self.assertNumQueries(2):
             self.test_get_depth_1_search_term()
         # When listing the tags below a specific tag, there is one additional query to load the parent tag:
-        with self.assertNumQueries(2):
+        with self.assertNumQueries(3):
             self.test_get_child_tags_one_level()
         with self.assertNumQueries(2):
             self.test_get_depth_1_child_search_term()
@@ -525,8 +527,9 @@ class TestFilteredTagsClosedTaxonomy(TestTagTaxonomyMixin, TestCase):
         """
         with self.assertNumQueries(1):
             self.test_get_all()
-        # Searching below a specific tag requires an additional query to load that tag:
-        with self.assertNumQueries(2):
+        # Searching below a specific tag requires an additional query to load that tag,
+        # 3 queries including a query to get the max depth for tag counts:
+        with self.assertNumQueries(3):
             self.test_tags_deep()
         # Keyword search requires an additional query:
         with self.assertNumQueries(2):
