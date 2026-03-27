@@ -596,7 +596,6 @@ class TestFilteredTagsClosedTaxonomy(TestTagTaxonomyMixin, TestCase):
 
     def test_usage_count_rolls_up_to_ancestors_deep(self) -> None:
         """
-        AI/Claude4.6 generated via IntelliJ IDEA AI Assistant
         When a child tag (depth 3) is applied to an object, it should
         roll up the count to all its ancestors when using _get_filtered_tags_deep.
         The child tag and each of its ancestors should have usage_count=1.
@@ -629,7 +628,6 @@ class TestFilteredTagsClosedTaxonomy(TestTagTaxonomyMixin, TestCase):
 
     def test_usage_count_multiple_objects_same_tag_deep(self) -> None:
         """
-        AI/Claude4.6 generated via IntelliJ IDEA AI Assistant
         When two distinct objects (e.g. seperate courses, modules, etc.) are tagged
         with the same child tag, it should count 2 for that tag (and roll up 2
         to ancestors). Each distinct object should contribute exactly 1 to the count.
@@ -647,7 +645,6 @@ class TestFilteredTagsClosedTaxonomy(TestTagTaxonomyMixin, TestCase):
 
     def test_usage_count_sibling_tags_same_object_deduplication_deep(self) -> None:
         """
-        AI/Claude4.6 generated via IntelliJ IDEA AI Assistant
         When one object is tagged with two sibling tags (both children of the same
         parent), the parent's usage_count should be 1, not 2. It should de-duplicate.
         """
@@ -666,7 +663,6 @@ class TestFilteredTagsClosedTaxonomy(TestTagTaxonomyMixin, TestCase):
 
     def test_usage_count_sibling_tags_different_objects_deep(self) -> None:
         """
-        AI/Claude4.6 generated via IntelliJ IDEA AI Assistant
         When two different objects are each tagged with a different sibling tag,
         the parent's usage_count should be 2, not 1.
         """
@@ -683,7 +679,6 @@ class TestFilteredTagsClosedTaxonomy(TestTagTaxonomyMixin, TestCase):
 
     def test_usage_count_one_level_root_tags(self) -> None:
         """
-        AI/Claude4.6 generated via IntelliJ IDEA AI Assistant
         _get_filtered_tags_one_level (depth=1) with include_counts=True should
         reflect the rolled-up usage count, not just direct usage.
         Tagging an object with a child tag should increment the root tag's count.
@@ -700,7 +695,6 @@ class TestFilteredTagsClosedTaxonomy(TestTagTaxonomyMixin, TestCase):
 
     def test_usage_count_one_level_child_tags(self) -> None:
         """
-        AI/Claude4.6 generated via IntelliJ IDEA AI Assistant
         When listing children of a tag (depth=1, parent_tag_value=...), the
         usage_count of each child should only reflect the objects tagged with
         that child or any of its descendants.
@@ -722,7 +716,6 @@ class TestFilteredTagsClosedTaxonomy(TestTagTaxonomyMixin, TestCase):
 
     def test_usage_count_three_levels_deep_rollup(self) -> None:
         """
-        AI/Claude4.6 generated via IntelliJ IDEA AI Assistant
         Tagging an object with a depth-3 tag (Chordata) should roll up
         to grandparent (Animalia) and great-grandparent (Eukaryota),
         verifying the full 3-level lineage query in add_counts_query.
@@ -740,7 +733,6 @@ class TestFilteredTagsClosedTaxonomy(TestTagTaxonomyMixin, TestCase):
 
     def test_usage_count_returns_zero_not_none_deep(self) -> None:
         """
-        AI/Claude4.6 generated via IntelliJ IDEA AI Assistant
         When no object has been tagged with a tag or any of its
         descendants, usage_count must be 0 (integer), not None.
         """
@@ -771,7 +763,6 @@ class TestFilteredTagsClosedTaxonomy(TestTagTaxonomyMixin, TestCase):
 
     def test_usage_count_with_search_term_deep(self) -> None:
         """
-        AI/Claude4.6 generated via IntelliJ IDEA AI Assistant
         When using get_filtered_tags() with both a search_term and
         include_counts=True, the usage_count returned should still
         reflect the true count for each matching tag, not be affected

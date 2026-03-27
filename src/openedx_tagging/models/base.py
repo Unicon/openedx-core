@@ -541,7 +541,7 @@ class Taxonomy(models.Model):
         qs = qs.values("value", "child_count", "descendant_count", "depth", "parent_value", "external_id", "_id")
         qs = qs.order_by("value")
         if include_counts:
-            qs = self.add_counts_query(qs)
+            qs = self._add_counts_query(qs)
         return qs  # type: ignore[return-value]
 
     def _get_filtered_tags_deep(
@@ -637,17 +637,18 @@ class Taxonomy(models.Model):
         # ordering by it gives the tree sort order that we want.
         qs = qs.order_by("lineage")
         if include_counts:
-            qs = self.add_counts_query(qs)
+            qs = self._add_counts_query(qs)
 
         return qs  # type: ignore[return-value]
 
-    def add_counts_query(self, qs: models.QuerySet):
+    def _add_counts_query(self, qs: models.QuerySet) -> models.QuerySet:
         """
         Adds a subquery to the passed-in queryset that returns the usage_count
-        for a given tag, or the appropriate count with de-deuplication per Object
-        for the parents of a used child tag
-        :param qs: The QuerySet to annotate with usage counts.
-        :return: the queryset annotated with the usage counts
+        for a given tag, or the appropriate count with deduplication per Object
+        for the parents of a used child tag.
+
+        The ``qs`` argument is the QuerySet to annotate with usage counts, and
+        the returned queryset is annotated with those usage counts.
         """
         # Adds a subquery to the passed-in queryset that returns the number
         # of times a tag has been used.
@@ -668,7 +669,8 @@ class Taxonomy(models.Model):
         # build a list of lineage paths to be used in the query, so we're not hard coding to
         # a certain number of levels. This will build an array containing something like:
         # ['tag_id', 'tag__parent_id', 'tag__parent__parent_id', 'tag__parent__parent__parent_id', ...]
-        lineage_paths = [f"tag{'__parent' * i}_id" for i in range(TAXONOMY_MAX_DEPTH+1)]
+        max_depth = qs.aggregate(models.Max("depth", default=0))["depth__max"]
+        lineage_paths = [f"tag{'__parent' * i}_id" for i in range(max_depth + 1)]
 
         # Combine the above-built lineage with a Q query against the OuterRef("pk"),
         lineage_query_list = [Q(**{path: models.OuterRef("pk")}) for path in lineage_paths]
@@ -683,8 +685,7 @@ class Taxonomy(models.Model):
             #   ...
             # ```
             # Previously the above was hard coded and needed to be changed with every
-            # change in TAXONOMY_MAX_DEPTH, now it is dynamic to reduce maintenace
-            # (Thanks Google for helping me build this)
+            # change in TAXONOMY_MAX_DEPTH, now it is built dynamically
 
             reduce(operator.or_, lineage_query_list)
         ).values('object_id').distinct().annotate(
