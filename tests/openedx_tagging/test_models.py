@@ -550,7 +550,7 @@ class TestFilteredTagsClosedTaxonomy(TestTagTaxonomyMixin, TestCase):
     def test_usage_count(self) -> None:
         """
         Test that the usage count in the results is right for a basic case;
-        many objects tagged seperately should return a simple usage count that
+        many objects tagged separately should return a simple usage count that
         reflects lineage de-duplication (or lack thereof, in this case)
         """
         api.tag_object(object_id="obj01", taxonomy=self.taxonomy, tags=["Bacteria"])
@@ -631,7 +631,7 @@ class TestFilteredTagsClosedTaxonomy(TestTagTaxonomyMixin, TestCase):
 
     def test_usage_count_multiple_objects_same_tag_deep(self) -> None:
         """
-        When two distinct objects (e.g. seperate courses, modules, etc.) are tagged
+        When two distinct objects (e.g. separate courses, modules, etc.) are tagged
         with the same child tag, it should count 2 for that tag (and roll up 2
         to ancestors). Each distinct object should contribute exactly 1 to the count.
         """
