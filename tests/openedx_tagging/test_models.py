@@ -578,15 +578,15 @@ class TestFilteredTagsClosedTaxonomy(TestTagTaxonomyMixin, TestCase):
         child tags being added to an object. However, we de-duplicate and only count
         1 parent tag towards a course even if 2 children are applied to that course
         """
-        api.tag_object(object_id="obj01", taxonomy=self.taxonomy, tags=["Bacteria"])
-        api.tag_object(object_id="obj01", taxonomy=self.taxonomy, tags=["Archaebacteria"])
+        self.taxonomy.allow_multiple = True
+        self.taxonomy.save()
+        api.tag_object(object_id="obj01", taxonomy=self.taxonomy, tags=["Bacteria", "Archaebacteria", "Eubacteria"])
         api.tag_object(object_id="obj02", taxonomy=self.taxonomy, tags=["Archaebacteria"])
-        api.tag_object(object_id="obj01", taxonomy=self.taxonomy, tags=["Eubacteria"])
         # Now the API should reflect these usage counts:
         result = pretty_format_tags(self.taxonomy.get_filtered_tags(search_term="bacteria", include_counts=True))
         assert result == [
             "Bacteria (None) (used: 2, children: 2)",
-            "  Archaebacteria (Bacteria) (used: 1, children: 0)",
+            "  Archaebacteria (Bacteria) (used: 2, children: 0)",
             "  Eubacteria (Bacteria) (used: 1, children: 0)",
         ]
         # Same with depth=1, which uses a different query internally:

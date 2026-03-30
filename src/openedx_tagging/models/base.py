@@ -670,14 +670,15 @@ class Taxonomy(models.Model):
         # a certain number of levels. This will query for the max depth, then build
         # an array containing something like:
         # ['tag_id', 'tag__parent_id', 'tag__parent__parent_id', 'tag__parent__parent__parent_id', ...]
-        max_depth = Tag.objects.aggregate(models.Max("depth", default=0))["depth__max"]
+        max_depth = Tag.objects.filter(taxonomy_id=self.id).aggregate(models.Max("depth", default=0))["depth__max"]
         lineage_paths = [f"tag{'__parent' * i}_id" for i in range(max_depth + 1)]
-
         # Combine the above-built lineage with a Q query against the OuterRef("pk"),
         lineage_query_list = [Q(**{path: models.OuterRef("pk")}) for path in lineage_paths]
 
         usage_count_qs = ObjectTag.objects.filter(
-            # Combine the logic built above with an or operator to flesh out a
+            taxonomy_id=self.id
+        ).filter(
+            # Combine the logic built above with an or operator to build out a
             # lineage query of the form:
             # ```
             #   Q(tag_id=OuterRef('pk')) |
@@ -687,8 +688,7 @@ class Taxonomy(models.Model):
             # ```
             # Previously the above was hard coded and needed to be changed with every
             # change in TAXONOMY_MAX_DEPTH, now it is built dynamically
-
-            reduce(operator.or_, lineage_query_list)
+            reduce(operator.or_, lineage_query_list),
         ).values('object_id').distinct().annotate(
             intermediate_grouping=Value(1, output_field=IntegerField())
         ).values('intermediate_grouping').annotate(
