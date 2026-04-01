@@ -610,8 +610,8 @@ class TestFilteredTagsClosedTaxonomy(TestTagTaxonomyMixin, TestCase):
             "Bacteria (None) (used: 0, children: 2)",
             "  Archaebacteria (Bacteria) (used: 0, children: 0)",
             "  Eubacteria (Bacteria) (used: 0, children: 0)",
-            "Eukaryota (None) (used: 1, children: 5 + 8)",
-            "  Animalia (Eukaryota) (used: 1, children: 7 + 1)",
+            "Eukaryota (None) (used: 1, children: 5)",
+            "  Animalia (Eukaryota) (used: 1, children: 7)",
             "    Arthropoda (Animalia) (used: 0, children: 0)",
             "    Chordata (Animalia) (used: 1, children: 1)",
             "      Mammalia (Chordata) (used: 1, children: 0)",
@@ -638,7 +638,7 @@ class TestFilteredTagsClosedTaxonomy(TestTagTaxonomyMixin, TestCase):
             self.taxonomy.get_filtered_tags(search_term="chordata", include_counts=True)
         )
         assert result == [
-            "Eukaryota (None) (used: 2, children: 1 + 1)",
+            "Eukaryota (None) (used: 2, children: 1)",
             "  Animalia (Eukaryota) (used: 2, children: 1)",
             "    Chordata (Animalia) (used: 2, children: 0)",
         ]
@@ -690,7 +690,7 @@ class TestFilteredTagsClosedTaxonomy(TestTagTaxonomyMixin, TestCase):
         assert result == [
             "Archaea (None) (used: 0, children: 3)",
             "Bacteria (None) (used: 1, children: 2)",
-            "Eukaryota (None) (used: 0, children: 5 + 8)",
+            "Eukaryota (None) (used: 0, children: 5)",
         ]
 
     def test_usage_count_one_level_child_tags(self) -> None:
@@ -726,7 +726,7 @@ class TestFilteredTagsClosedTaxonomy(TestTagTaxonomyMixin, TestCase):
             self.taxonomy.get_filtered_tags(search_term="chordata", include_counts=True)
         )
         assert result == [
-            "Eukaryota (None) (used: 1, children: 1 + 1)",
+            "Eukaryota (None) (used: 1, children: 1)",
             "  Animalia (Eukaryota) (used: 1, children: 1)",
             "    Chordata (Animalia) (used: 1, children: 0)",
         ]
@@ -745,8 +745,8 @@ class TestFilteredTagsClosedTaxonomy(TestTagTaxonomyMixin, TestCase):
             "Bacteria (None) (used: 0, children: 2)",
             "  Archaebacteria (Bacteria) (used: 0, children: 0)",
             "  Eubacteria (Bacteria) (used: 0, children: 0)",
-            "Eukaryota (None) (used: 0, children: 5 + 8)",
-            "  Animalia (Eukaryota) (used: 0, children: 7 + 1)",
+            "Eukaryota (None) (used: 0, children: 5)",
+            "  Animalia (Eukaryota) (used: 0, children: 7)",
             "    Arthropoda (Animalia) (used: 0, children: 0)",
             "    Chordata (Animalia) (used: 0, children: 1)",
             "      Mammalia (Chordata) (used: 0, children: 0)",

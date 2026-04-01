@@ -764,7 +764,7 @@ class TestApiTagging(TestTagTaxonomyMixin, TestCase):
             "  Proteoarchaeota (used: 0, children: 0)",
             "Bacteria (used: 1, children: 1)",  # does not contain "ar" but a child does
             "  Archaebacteria (used: 1, children: 0)",
-            "Eukaryota (used: 6, children: 1 + 2)",
+            "Eukaryota (used: 6, children: 1)",
             "  Animalia (used: 4, children: 2)",  # does not contain "ar" but a child does
             "    Arthropoda (used: 1, children: 0)",
             "    Cnidaria (used: 0, children: 0)",
@@ -786,8 +786,8 @@ class TestApiTagging(TestTagTaxonomyMixin, TestCase):
             "Bacteria (used: 1, children: 2)",
             "  Archaebacteria (used: 1, children: 0)",
             "  Eubacteria (used: 0, children: 0)",
-            "Eukaryota (used: 6, children: 4 + 8)",
-            "  Animalia (used: 4, children: 7 + 1)",
+            "Eukaryota (used: 6, children: 4)",
+            "  Animalia (used: 4, children: 7)",
             "    Arthropoda (used: 1, children: 0)",
             "    Chordata (used: 0, children: 1)",
             "      Mammalia (used: 0, children: 0)",
