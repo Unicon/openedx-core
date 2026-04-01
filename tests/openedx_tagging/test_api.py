@@ -789,7 +789,7 @@ class TestApiTagging(TestTagTaxonomyMixin, TestCase):
             "Eukaryota (used: 6, children: 4 + 8)",
             "  Animalia (used: 4, children: 7 + 1)",
             "    Arthropoda (used: 1, children: 0)",
-            "    Chordata (used: 0, children: 1)",  # <<< Chordata has a matching child but we only support searching
+            "    Chordata (used: 0, children: 1)",
             "      Mammalia (used: 0, children: 0)",
             "    Cnidaria (used: 0, children: 0)",  # 3 levels deep at once for now.
             "    Ctenophora (used: 0, children: 0)",

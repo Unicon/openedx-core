@@ -576,7 +576,7 @@ class TestFilteredTagsClosedTaxonomy(TestTagTaxonomyMixin, TestCase):
         """
         Test that the usage count is correct and parent counts are included based on
         child tags being added to an object. However, we de-duplicate and only count
-        1 parent tag towards a course even if 2 children are applied to that course
+        1 parent tag towards each object even if 2 children are applied to that object
         """
         self.taxonomy.allow_multiple = True
         self.taxonomy.save()
