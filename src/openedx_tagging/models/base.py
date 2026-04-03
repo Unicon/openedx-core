@@ -6,9 +6,8 @@ from __future__ import annotations
 
 import logging
 import re
-
-from typing import List, Self
 from collections import Counter, defaultdict
+from typing import List, Self, cast
 
 from django.core.exceptions import ValidationError
 from django.db import models
@@ -534,7 +533,7 @@ class Taxonomy(models.Model):
         qs = qs.values("value", "child_count", "depth", "parent_value", "external_id", "_id")
         qs = qs.order_by("value")
         if include_counts:
-            return self._add_counts(list(qs))  # type: ignore[return-value]
+            return self._add_counts(list(cast(list, qs)))  # type: ignore[return-value]
 
         return qs  # type: ignore[return-value]
 
@@ -610,7 +609,7 @@ class Taxonomy(models.Model):
         # ordering by it gives the tree sort order that we want.
         qs = qs.order_by("lineage")
         if include_counts:
-            return self._add_counts(list(qs))  # type: ignore[return-value]
+            return self._add_counts(list(cast(list, qs)))  # type: ignore[return-value]
 
         return qs  # type: ignore[return-value]
 
@@ -625,8 +624,8 @@ class Taxonomy(models.Model):
 
         tag_lineage_dict = dict(self.tag_set.all().filter(taxonomy_id=self.id).values_list("value", "lineage"))
         object_tags = self.objecttag_set.all().filter(taxonomy_id=self.id).values_list("_value", "object_id")
-        tag_counts = Counter()
-        object_tag_lineage_seen = defaultdict(set)
+        tag_counts: Counter[str] = Counter()
+        object_tag_lineage_seen: defaultdict[str, set] = defaultdict(set)
 
         for tag_value, object_id in object_tags:
             # split the lineages to get a dict of {tag.value: [lineages]}
