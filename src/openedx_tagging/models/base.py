@@ -5,15 +5,15 @@ Tagging app base data models
 from __future__ import annotations
 
 import logging
-import operator
 import re
-from functools import reduce
+
 from typing import List, Self
+from collections import Counter, defaultdict
 
 from django.core.exceptions import ValidationError
 from django.db import models
-from django.db.models import Count, F, IntegerField, Q, Subquery, Value
-from django.db.models.functions import Coalesce, Concat, Length, Replace, Substr
+from django.db.models import F, Value
+from django.db.models.functions import Concat, Length, Replace, Substr
 from django.utils.functional import cached_property
 from django.utils.module_loading import import_string
 from django.utils.translation import gettext_lazy as _
@@ -534,7 +534,8 @@ class Taxonomy(models.Model):
         qs = qs.values("value", "child_count", "depth", "parent_value", "external_id", "_id")
         qs = qs.order_by("value")
         if include_counts:
-            qs = self._add_counts_query(qs)
+            return self._add_counts(list(qs))  # type: ignore[return-value]
+
         return qs  # type: ignore[return-value]
 
     def _get_filtered_tags_deep(
@@ -609,71 +610,38 @@ class Taxonomy(models.Model):
         # ordering by it gives the tree sort order that we want.
         qs = qs.order_by("lineage")
         if include_counts:
-            qs = self._add_counts_query(qs)
+            return self._add_counts(list(qs))  # type: ignore[return-value]
 
         return qs  # type: ignore[return-value]
 
-    def _add_counts_query(self, qs: models.QuerySet) -> models.QuerySet:
+    def _add_counts(self, tag_data: list[dict]) -> list[dict]:
         """
-        Adds a subquery to the passed-in queryset that returns the usage_count
-        for a given tag, or the appropriate count with deduplication per Object
-        for the parents of a used child tag.
-
-        The ``qs`` argument is the QuerySet to annotate with usage counts, and
-        the returned queryset is annotated with those usage counts.
+        Add usage counts to a list of tag data dictionaries. For performance
+        reasons, we call this function with the list result of the
+        QuerySet so we can then add the counts in-memory rather than to a
+        QuerySet which would require a very expensive annotation to join the
+        in-memory data to the original QuerySet.
         """
-        # Adds a subquery to the passed-in queryset that returns the number
-        # of times a tag has been used.
-        #
-        # Note: The count is not a simple count, we need to do a 'roll up'
-        # where we count the number of times a tag is directly used and applied,
-        # but then that also needs to add a "1" count to the lineage tags
-        # (parent, grandparent, etc.), but de-duplicate counts for any children
-        # so that if we have "2" child tags, it only counts towards "1" for the
-        # parent.
-        # This query gets the raw counts for each tag usage, gets the distinct
-        # usages (so de-duplicates counts) by actual application to an "Object"
-        # (library, course, course module, course section, etc.), which creates
-        # a count per tag, annotated to that particular tag from the passed-in
-        # queryset.
 
-        # Since Depth may be variable based on the taxonomy, we dynamically build
-        # a list of lineage paths to be used in the query, so we're not hard coding to
-        # a certain number of levels. This will query for the max depth, then build
-        # an array containing something like:
-        # ['tag_id', 'tag__parent_id', 'tag__parent__parent_id', 'tag__parent__parent__parent_id', ...]
-        max_depth = Tag.objects.filter(taxonomy_id=self.id).aggregate(models.Max("depth", default=0))["depth__max"]
-        lineage_paths = [f"tag{'__parent' * i}_id" for i in range(max_depth + 1)]
-        # Combine the above-built lineage with a Q query against the OuterRef("pk"),
-        lineage_query_list = [Q(**{path: models.OuterRef("pk")}) for path in lineage_paths]
+        tag_lineage_dict = dict(self.tag_set.all().filter(taxonomy_id=self.id).values_list("value", "lineage"))
+        object_tags = self.objecttag_set.all().filter(taxonomy_id=self.id).values_list("_value", "object_id")
+        tag_counts = Counter()
+        object_tag_lineage_seen = defaultdict(set)
 
-        usage_count_qs = ObjectTag.objects.filter(
-            taxonomy_id=self.id
-        ).filter(
-            # Combine the logic built above with an or operator to build out a
-            # lineage query of the form:
-            # ```
-            #   Q(tag_id=OuterRef('pk')) |
-            #   Q(tag__parent_id=OuterRef('pk')) |
-            #   Q(tag__parent__parent_id=OuterRef('pk')) |
-            #   ...
-            # ```
-            # Previously the above was hard coded and needed to be changed with every
-            # change in TAXONOMY_MAX_DEPTH, now it is built dynamically
-            reduce(operator.or_, lineage_query_list),
-        ).values('object_id').distinct().annotate(
-            intermediate_grouping=Value(1, output_field=IntegerField())
-        ).values('intermediate_grouping').annotate(
-            total_usage=Count('object_id', distinct=True)
-        ).values('total_usage')
+        for tag_value, object_id in object_tags:
+            # split the lineages to get a dict of {tag.value: [lineages]}
+            lineage_tags = (t for t in tag_lineage_dict.get(tag_value, "").split('\t') if t)
+            # de-duplicate based on if the lineage is already 'seen' per object
+            unseen_tags = [t for t in lineage_tags if t not in object_tag_lineage_seen[object_id]]
 
-        qs = qs.annotate(
-            usage_count=Coalesce(
-                Subquery(usage_count_qs, output_field=IntegerField()),
-                0  # Coalesce ensures we return 0 instead of None if there are no usages
-            )
-        )
-        return qs
+            tag_counts.update(unseen_tags)
+            object_tag_lineage_seen[object_id].update(unseen_tags)
+
+        # In-memory 'annotation'; this is faster than using annotate() on the QuerySet.
+        for row in tag_data:
+            row["usage_count"] = tag_counts.get(row["value"], 0)
+
+        return tag_data
 
     def add_tag(
         self,
