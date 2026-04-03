@@ -51,6 +51,7 @@ class TestTagTaxonomyMixin:
         self.chordata = get_tag("Chordata")
         self.mammalia = get_tag("Mammalia")
         self.animalia = get_tag("Animalia")
+        self.eukaryota = get_tag("Eukaryota")
         self.system_taxonomy_tag = get_tag("System Tag 1")
         self.english_tag = self.language_taxonomy.tag_for_external_id("en")
         self.user_1 = get_user_model()(
@@ -329,9 +330,9 @@ class TestFilteredTagsClosedTaxonomy(TestTagTaxonomyMixin, TestCase):
             del r["_id"]  # Remove the internal database IDs; they aren't interesting here and a other tests check them
         assert result == [
             # These are the root tags, in alphabetical order:
-            {"value": "Archaea", "child_count": 3, "descendant_count": 3, **common_fields},
-            {"value": "Bacteria", "child_count": 2, "descendant_count": 2, **common_fields},
-            {"value": "Eukaryota", "child_count": 5, "descendant_count": 13, **common_fields},
+            {"value": "Archaea", "child_count": 3, **common_fields},
+            {"value": "Bacteria", "child_count": 2, **common_fields},
+            {"value": "Eukaryota", "child_count": 5, **common_fields},
         ]
 
     def test_get_child_tags_one_level(self) -> None:
@@ -345,11 +346,11 @@ class TestFilteredTagsClosedTaxonomy(TestTagTaxonomyMixin, TestCase):
             del r["_id"]  # Remove the internal database IDs; they aren't interesting here and a other tests check them
         assert result == [
             # These are the Eukaryota tags, in alphabetical order:
-            {"value": "Animalia", "child_count": 7, "descendant_count": 8, **common_fields},
-            {"value": "Fungi", "child_count": 0, "descendant_count": 0, **common_fields},
-            {"value": "Monera", "child_count": 0, "descendant_count": 0, **common_fields},
-            {"value": "Plantae", "child_count": 0, "descendant_count": 0, **common_fields},
-            {"value": "Protista", "child_count": 0, "descendant_count": 0, **common_fields},
+            {"value": "Animalia", "child_count": 7, **common_fields},
+            {"value": "Fungi", "child_count": 0, **common_fields},
+            {"value": "Monera", "child_count": 0, **common_fields},
+            {"value": "Plantae", "child_count": 0, **common_fields},
+            {"value": "Protista", "child_count": 0, **common_fields},
         ]
 
     def test_get_grandchild_tags_one_level(self) -> None:
@@ -363,13 +364,13 @@ class TestFilteredTagsClosedTaxonomy(TestTagTaxonomyMixin, TestCase):
             del r["_id"]  # Remove the internal database IDs; they aren't interesting here and a other tests check them
         assert result == [
             # These are the Eukaryota tags, in alphabetical order:
-            {"value": "Arthropoda", "child_count": 0, "descendant_count": 0, **common_fields},
-            {"value": "Chordata", "child_count": 1, "descendant_count": 1, **common_fields},
-            {"value": "Cnidaria", "child_count": 0, "descendant_count": 0, **common_fields},
-            {"value": "Ctenophora", "child_count": 0, "descendant_count": 0, **common_fields},
-            {"value": "Gastrotrich", "child_count": 0, "descendant_count": 0, **common_fields},
-            {"value": "Placozoa", "child_count": 0, "descendant_count": 0, **common_fields},
-            {"value": "Porifera", "child_count": 0, "descendant_count": 0, **common_fields},
+            {"value": "Arthropoda", "child_count": 0, **common_fields},
+            {"value": "Chordata", "child_count": 1, **common_fields},
+            {"value": "Cnidaria", "child_count": 0, **common_fields},
+            {"value": "Ctenophora", "child_count": 0, **common_fields},
+            {"value": "Gastrotrich", "child_count": 0, **common_fields},
+            {"value": "Placozoa", "child_count": 0, **common_fields},
+            {"value": "Porifera", "child_count": 0, **common_fields},
         ]
 
     def test_get_depth_1_search_term(self) -> None:
@@ -381,7 +382,6 @@ class TestFilteredTagsClosedTaxonomy(TestTagTaxonomyMixin, TestCase):
             {
                 "value": "Archaea",
                 "child_count": 3,
-                "descendant_count": 3,
                 "depth": 0,
                 "usage_count": 0,
                 "parent_value": None,
@@ -400,7 +400,6 @@ class TestFilteredTagsClosedTaxonomy(TestTagTaxonomyMixin, TestCase):
             {
                 "value": "Archaebacteria",
                 "child_count": 0,
-                "descendant_count": 0,
                 "depth": 1,
                 "parent_value": "Bacteria",
                 "external_id": None,
@@ -416,10 +415,12 @@ class TestFilteredTagsClosedTaxonomy(TestTagTaxonomyMixin, TestCase):
         """
         with self.assertNumQueries(1):
             self.test_get_root()
-        with self.assertNumQueries(1):
+
+        # 2 queries including a query to get 1. max depth and 2. objs for tag counts
+        with self.assertNumQueries(3):
             self.test_get_depth_1_search_term()
         # When listing the tags below a specific tag, there is one additional query to load the parent tag:
-        with self.assertNumQueries(2):
+        with self.assertNumQueries(4):
             self.test_get_child_tags_one_level()
         with self.assertNumQueries(2):
             self.test_get_depth_1_child_search_term()
@@ -441,8 +442,8 @@ class TestFilteredTagsClosedTaxonomy(TestTagTaxonomyMixin, TestCase):
             "Bacteria (None) (children: 2)",
             "  Archaebacteria (Bacteria) (children: 0)",
             "  Eubacteria (Bacteria) (children: 0)",
-            "Eukaryota (None) (children: 5 + 8)",
-            "  Animalia (Eukaryota) (children: 7 + 1)",
+            "Eukaryota (None) (children: 5)",
+            "  Animalia (Eukaryota) (children: 7)",
             "    Arthropoda (Animalia) (children: 0)",
             "    Chordata (Animalia) (children: 1)",
             "      Mammalia (Chordata) (children: 0)",
@@ -478,7 +479,7 @@ class TestFilteredTagsClosedTaxonomy(TestTagTaxonomyMixin, TestCase):
         """
         result = pretty_format_tags(self.taxonomy.get_filtered_tags(search_term="chordata"))
         assert result == [
-            "Eukaryota (None) (children: 1 + 1)",  # Has one child that matches, plus one additional matching descendant
+            "Eukaryota (None) (children: 1)",  # Has one child that matches
             "  Animalia (Eukaryota) (children: 1)",
             "    Chordata (Animalia) (children: 0)",  # this is the matching tag.
         ]
@@ -492,8 +493,8 @@ class TestFilteredTagsClosedTaxonomy(TestTagTaxonomyMixin, TestCase):
         assert result == [
             "Archaea (None) (children: 1)",
             "  Proteoarchaeota (Archaea) (children: 0)",
-            "Eukaryota (None) (children: 2 + 2)",  # 2 direct matching children, 2 additional matching descendants
-            "  Animalia (Eukaryota) (children: 2)",
+            "Eukaryota (None) (children: 2)",  # 2 direct matching children
+            "  Animalia (Eukaryota) (children: 2)",  # also 2 matching children
             "    Arthropoda (Animalia) (children: 0)",  # match
             "    Gastrotrich (Animalia) (children: 0)",  # match
             "  Protista (Eukaryota) (children: 0)",  # match
@@ -511,7 +512,6 @@ class TestFilteredTagsClosedTaxonomy(TestTagTaxonomyMixin, TestCase):
                 "depth": 3,
                 "usage_count": 0,
                 "child_count": 0,
-                "descendant_count": 0,
                 "external_id": None,
                 "_id": 21,  # These IDs are hard-coded in the test fixture file
             }
@@ -524,8 +524,10 @@ class TestFilteredTagsClosedTaxonomy(TestTagTaxonomyMixin, TestCase):
         """
         with self.assertNumQueries(1):
             self.test_get_all()
-        # Searching below a specific tag requires an additional query to load that tag:
-        with self.assertNumQueries(2):
+        # Searching below a specific tag requires an additional query to load that tag,
+        # 4 queries including a query to get the 1.max depth for tag counts and 2 objs
+        # for counts:
+        with self.assertNumQueries(4):
             self.test_tags_deep()
         # Keyword search requires an additional query:
         with self.assertNumQueries(2):
@@ -545,7 +547,9 @@ class TestFilteredTagsClosedTaxonomy(TestTagTaxonomyMixin, TestCase):
 
     def test_usage_count(self) -> None:
         """
-        Test that the usage count in the results is right
+        Test that the usage count in the results is right for a basic case;
+        many objects tagged separately should return a simple usage count that
+        reflects lineage de-duplication (or lack thereof, in this case)
         """
         api.tag_object(object_id="obj01", taxonomy=self.taxonomy, tags=["Bacteria"])
         api.tag_object(object_id="obj02", taxonomy=self.taxonomy, tags=["Bacteria"])
@@ -554,7 +558,7 @@ class TestFilteredTagsClosedTaxonomy(TestTagTaxonomyMixin, TestCase):
         # Now the API should reflect these usage counts:
         result = pretty_format_tags(self.taxonomy.get_filtered_tags(search_term="bacteria", include_counts=True))
         assert result == [
-            "Bacteria (None) (used: 3, children: 2)",
+            "Bacteria (None) (used: 4, children: 2)",
             "  Archaebacteria (Bacteria) (used: 0, children: 0)",
             "  Eubacteria (Bacteria) (used: 1, children: 0)",
         ]
@@ -563,7 +567,217 @@ class TestFilteredTagsClosedTaxonomy(TestTagTaxonomyMixin, TestCase):
             self.taxonomy.get_filtered_tags(search_term="bacteria", include_counts=True, depth=1)
         )
         assert result1 == [
-            "Bacteria (None) (used: 3, children: 2)",
+            "Bacteria (None) (used: 4, children: 2)",
+        ]
+
+    def test_usage_count_lineage_count_across_same_course(self) -> None:
+        """
+        Test that the usage count is correct and parent counts are included based on
+        child tags being added to an object. However, we de-duplicate and only count
+        1 parent tag towards each object even if 2 children are applied to that object
+        """
+        self.taxonomy.allow_multiple = True
+        self.taxonomy.save()
+        api.tag_object(object_id="obj01", taxonomy=self.taxonomy, tags=["Bacteria", "Archaebacteria", "Eubacteria"])
+        api.tag_object(object_id="obj02", taxonomy=self.taxonomy, tags=["Archaebacteria"])
+        # Now the API should reflect these usage counts:
+        result = pretty_format_tags(self.taxonomy.get_filtered_tags(search_term="bacteria", include_counts=True))
+        assert result == [
+            "Bacteria (None) (used: 2, children: 2)",
+            "  Archaebacteria (Bacteria) (used: 2, children: 0)",
+            "  Eubacteria (Bacteria) (used: 1, children: 0)",
+        ]
+        # Same with depth=1, which uses a different query internally:
+        result1 = pretty_format_tags(
+            self.taxonomy.get_filtered_tags(search_term="bacteria", include_counts=True, depth=1)
+        )
+        assert result1 == [
+            "Bacteria (None) (used: 2, children: 2)",
+        ]
+
+    def test_usage_count_rolls_up_to_ancestors_deep(self) -> None:
+        """
+        When a child tag (depth 3) is applied to an object, it should
+        roll up the count to all its ancestors when using _get_filtered_tags_deep.
+        The child tag and each of its ancestors should have usage_count=1.
+        """
+        api.tag_object("obj:1", self.taxonomy, [self.mammalia.value])
+        result = pretty_format_tags(self.taxonomy.get_filtered_tags(include_counts=True))
+        assert result == [
+            "Archaea (None) (used: 0, children: 3)",
+            "  DPANN (Archaea) (used: 0, children: 0)",
+            "  Euryarchaeida (Archaea) (used: 0, children: 0)",
+            "  Proteoarchaeota (Archaea) (used: 0, children: 0)",
+            "Bacteria (None) (used: 0, children: 2)",
+            "  Archaebacteria (Bacteria) (used: 0, children: 0)",
+            "  Eubacteria (Bacteria) (used: 0, children: 0)",
+            "Eukaryota (None) (used: 1, children: 5)",
+            "  Animalia (Eukaryota) (used: 1, children: 7)",
+            "    Arthropoda (Animalia) (used: 0, children: 0)",
+            "    Chordata (Animalia) (used: 1, children: 1)",
+            "      Mammalia (Chordata) (used: 1, children: 0)",
+            "    Cnidaria (Animalia) (used: 0, children: 0)",
+            "    Ctenophora (Animalia) (used: 0, children: 0)",
+            "    Gastrotrich (Animalia) (used: 0, children: 0)",
+            "    Placozoa (Animalia) (used: 0, children: 0)",
+            "    Porifera (Animalia) (used: 0, children: 0)",
+            "  Fungi (Eukaryota) (used: 0, children: 0)",
+            "  Monera (Eukaryota) (used: 0, children: 0)",
+            "  Plantae (Eukaryota) (used: 0, children: 0)",
+            "  Protista (Eukaryota) (used: 0, children: 0)",
+        ]
+
+    def test_usage_count_multiple_objects_same_tag_deep(self) -> None:
+        """
+        When two distinct objects (e.g. separate courses, modules, etc.) are tagged
+        with the same child tag, it should count 2 for that tag (and roll up 2
+        to ancestors). Each distinct object should contribute exactly 1 to the count.
+        """
+        api.tag_object("obj:1", self.taxonomy, [self.chordata.value])
+        api.tag_object("obj:2", self.taxonomy, [self.chordata.value])
+        result = pretty_format_tags(
+            self.taxonomy.get_filtered_tags(search_term="chordata", include_counts=True)
+        )
+        assert result == [
+            "Eukaryota (None) (used: 2, children: 1)",
+            "  Animalia (Eukaryota) (used: 2, children: 1)",
+            "    Chordata (Animalia) (used: 2, children: 0)",
+        ]
+
+    def test_usage_count_sibling_tags_same_object_deduplication_deep(self) -> None:
+        """
+        When one object is tagged with two sibling tags (both children of the same
+        parent), the parent's usage_count should be 1, not 2. It should de-duplicate.
+        """
+        self.taxonomy.allow_multiple = True
+        self.taxonomy.save()
+        # Eubacteria and Archaebacteria are both children of Bacteria
+        api.tag_object("obj:1", self.taxonomy, [self.eubacteria.value, self.archaebacteria.value])
+        result = pretty_format_tags(
+            self.taxonomy.get_filtered_tags(search_term="bacteria", include_counts=True)
+        )
+        assert result == [
+            "Bacteria (None) (used: 1, children: 2)",
+            "  Archaebacteria (Bacteria) (used: 1, children: 0)",
+            "  Eubacteria (Bacteria) (used: 1, children: 0)",
+        ]
+
+    def test_usage_count_sibling_tags_different_objects_deep(self) -> None:
+        """
+        When two different objects are each tagged with a different sibling tag,
+        the parent's usage_count should be 2, not 1.
+        """
+        api.tag_object("obj:1", self.taxonomy, [self.eubacteria.value])
+        api.tag_object("obj:2", self.taxonomy, [self.archaebacteria.value])
+        result = pretty_format_tags(
+            self.taxonomy.get_filtered_tags(search_term="bacteria", include_counts=True)
+        )
+        assert result == [
+            "Bacteria (None) (used: 2, children: 2)",
+            "  Archaebacteria (Bacteria) (used: 1, children: 0)",
+            "  Eubacteria (Bacteria) (used: 1, children: 0)",
+        ]
+
+    def test_usage_count_one_level_root_tags(self) -> None:
+        """
+        _get_filtered_tags_one_level (depth=1) with include_counts=True should
+        reflect the rolled-up usage count, not just direct usage.
+        Tagging an object with a child tag should increment the root tag's count.
+        """
+        api.tag_object("obj:1", self.taxonomy, [self.eubacteria.value])  # child of Bacteria
+        result = pretty_format_tags(
+            self.taxonomy.get_filtered_tags(depth=1, include_counts=True)
+        )
+        assert result == [
+            "Archaea (None) (used: 0, children: 3)",
+            "Bacteria (None) (used: 1, children: 2)",
+            "Eukaryota (None) (used: 0, children: 5)",
+        ]
+
+    def test_usage_count_one_level_child_tags(self) -> None:
+        """
+        When listing children of a tag (depth=1, parent_tag_value=...), the
+        usage_count of each child should only reflect the objects tagged with
+        that child or any of its descendants.
+        """
+        api.tag_object("obj:1", self.taxonomy, [self.mammalia.value])  # grandchild of Animalia via Chordata
+        api.tag_object("obj:2", self.taxonomy, [self.chordata.value])  # direct child of Animalia
+        result = pretty_format_tags(
+            self.taxonomy.get_filtered_tags(depth=1, parent_tag_value="Animalia", include_counts=True)
+        )
+        assert result == [
+            "    Arthropoda (Animalia) (used: 0, children: 0)",
+            "    Chordata (Animalia) (used: 2, children: 1)",
+            "    Cnidaria (Animalia) (used: 0, children: 0)",
+            "    Ctenophora (Animalia) (used: 0, children: 0)",
+            "    Gastrotrich (Animalia) (used: 0, children: 0)",
+            "    Placozoa (Animalia) (used: 0, children: 0)",
+            "    Porifera (Animalia) (used: 0, children: 0)",
+        ]
+
+    def test_usage_count_three_levels_deep_rollup(self) -> None:
+        """
+        Tagging an object with a depth-3 tag (Chordata) should roll up
+        to grandparent (Animalia) and great-grandparent (Eukaryota),
+        verifying the full 3-level lineage query in add_counts_query.
+        """
+        api.tag_object("obj:1", self.taxonomy, [self.animalia.value])
+        api.tag_object("obj:1", self.taxonomy, [self.chordata.value])
+        result = pretty_format_tags(
+            self.taxonomy.get_filtered_tags(search_term="chordata", include_counts=True)
+        )
+        assert result == [
+            "Eukaryota (None) (used: 1, children: 1)",
+            "  Animalia (Eukaryota) (used: 1, children: 1)",
+            "    Chordata (Animalia) (used: 1, children: 0)",
+        ]
+
+    def test_usage_count_returns_zero_not_none_deep(self) -> None:
+        """
+        When no object has been tagged with a tag or any of its
+        descendants, usage_count must be 0 (integer), not None.
+        """
+        result = pretty_format_tags(self.taxonomy.get_filtered_tags(include_counts=True))
+        assert result == [
+            "Archaea (None) (used: 0, children: 3)",
+            "  DPANN (Archaea) (used: 0, children: 0)",
+            "  Euryarchaeida (Archaea) (used: 0, children: 0)",
+            "  Proteoarchaeota (Archaea) (used: 0, children: 0)",
+            "Bacteria (None) (used: 0, children: 2)",
+            "  Archaebacteria (Bacteria) (used: 0, children: 0)",
+            "  Eubacteria (Bacteria) (used: 0, children: 0)",
+            "Eukaryota (None) (used: 0, children: 5)",
+            "  Animalia (Eukaryota) (used: 0, children: 7)",
+            "    Arthropoda (Animalia) (used: 0, children: 0)",
+            "    Chordata (Animalia) (used: 0, children: 1)",
+            "      Mammalia (Chordata) (used: 0, children: 0)",
+            "    Cnidaria (Animalia) (used: 0, children: 0)",
+            "    Ctenophora (Animalia) (used: 0, children: 0)",
+            "    Gastrotrich (Animalia) (used: 0, children: 0)",
+            "    Placozoa (Animalia) (used: 0, children: 0)",
+            "    Porifera (Animalia) (used: 0, children: 0)",
+            "  Fungi (Eukaryota) (used: 0, children: 0)",
+            "  Monera (Eukaryota) (used: 0, children: 0)",
+            "  Plantae (Eukaryota) (used: 0, children: 0)",
+            "  Protista (Eukaryota) (used: 0, children: 0)",
+        ]
+
+    def test_usage_count_with_search_term_deep(self) -> None:
+        """
+        When using get_filtered_tags() with both a search_term and
+        include_counts=True, the usage_count returned should still
+        reflect the true count for each matching tag, not be affected
+        by the search filter.
+        """
+        api.tag_object("obj:1", self.taxonomy, [self.eubacteria.value])
+        api.tag_object("obj:2", self.taxonomy, [self.archaebacteria.value])
+        result = pretty_format_tags(
+            self.taxonomy.get_filtered_tags(search_term="bacteria", include_counts=True)
+        )
+        assert result == [
+            "Bacteria (None) (used: 2, children: 2)",
+            "  Archaebacteria (Bacteria) (used: 1, children: 0)",
+            "  Eubacteria (Bacteria) (used: 1, children: 0)",
         ]
 
     def test_tree_sort(self) -> None:
@@ -575,7 +789,7 @@ class TestFilteredTagsClosedTaxonomy(TestTagTaxonomyMixin, TestCase):
         taxonomy = self.create_sort_test_taxonomy()
         result = pretty_format_tags(taxonomy.get_filtered_tags())
         assert result == [
-            "1 (None) (children: 4 + 1)",
+            "1 (None) (children: 4)",
             "  1 A (1) (children: 0)",
             "  11 (1) (children: 0)",
             "  11111 (1) (children: 1)",
@@ -593,43 +807,6 @@ class TestFilteredTagsClosedTaxonomy(TestTagTaxonomyMixin, TestCase):
             "  Android (ALPHABET) (children: 0)",
             "  ANVIL (ALPHABET) (children: 0)",
             "  azure (ALPHABET) (children: 0)",
-        ]
-
-    def test_descendant_counts(self) -> None:
-        """
-        Test getting the descendant count on a taxonomy known to cause aggregation
-        bugs unless the aggregations are correctly specified with distinct=True
-
-        https://docs.djangoproject.com/en/5.0/topics/db/aggregation/#combining-multiple-aggregations
-        """
-        taxonomy = api.create_taxonomy("ESDC Subset")
-        api.add_tag_to_taxonomy(taxonomy, "Interests")  # root tag
-        api.add_tag_to_taxonomy(taxonomy, "Holland Codes", parent_tag_value="Interests")  # child tag
-        # Create the grandchild tag:
-        g_tag = api.add_tag_to_taxonomy(taxonomy, "Interests - Holland Codes", parent_tag_value="Holland Codes")
-        # Create the 6 great-grandchild tags:
-        api.add_tag_to_taxonomy(taxonomy, "Artistic", parent_tag_value=g_tag.value)
-        api.add_tag_to_taxonomy(taxonomy, "Conventional", parent_tag_value=g_tag.value)
-        api.add_tag_to_taxonomy(taxonomy, "Enterprising", parent_tag_value=g_tag.value)
-        api.add_tag_to_taxonomy(taxonomy, "Investigative", parent_tag_value=g_tag.value)
-        api.add_tag_to_taxonomy(taxonomy, "Realistic", parent_tag_value=g_tag.value)
-        api.add_tag_to_taxonomy(taxonomy, "Social", parent_tag_value=g_tag.value)
-
-        result = pretty_format_tags(taxonomy.get_filtered_tags(depth=1, include_counts=True))
-        assert result == [
-            "Interests (None) (used: 0, children: 1 + 7)",  # 1 child + (1 grandchild and 6 great grandchild tags)
-        ]
-        result2 = pretty_format_tags(taxonomy.get_filtered_tags(depth=None, include_counts=True))
-        assert result2 == [
-            "Interests (None) (used: 0, children: 1 + 7)",
-            "  Holland Codes (Interests) (used: 0, children: 1 + 6)",
-            "    Interests - Holland Codes (Holland Codes) (used: 0, children: 6)",
-            "      Artistic (Interests - Holland Codes) (used: 0, children: 0)",
-            "      Conventional (Interests - Holland Codes) (used: 0, children: 0)",
-            "      Enterprising (Interests - Holland Codes) (used: 0, children: 0)",
-            "      Investigative (Interests - Holland Codes) (used: 0, children: 0)",
-            "      Realistic (Interests - Holland Codes) (used: 0, children: 0)",
-            "      Social (Interests - Holland Codes) (used: 0, children: 0)",
         ]
 
 
