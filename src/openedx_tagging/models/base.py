@@ -6,7 +6,8 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import List, Self
+from collections import Counter, defaultdict
+from typing import List, Self, cast
 
 from django.core.exceptions import ValidationError
 from django.db import models
@@ -532,16 +533,8 @@ class Taxonomy(models.Model):
         qs = qs.values("value", "child_count", "depth", "parent_value", "external_id", "_id")
         qs = qs.order_by("value")
         if include_counts:
-            # We need to include the count of how many times this tag is used to tag objects.
-            # You'd think we could just use:
-            #     qs = qs.annotate(usage_count=models.Count("objecttag__pk"))
-            # but that adds another join which starts creating a cross product and the children and usage_count become
-            # intertwined and multiplied with each other. So we use a subquery.
-            obj_tags = ObjectTag.objects.filter(tag_id=models.OuterRef("pk")).order_by().annotate(
-                # We need to use Func() to get Count() without GROUP BY - see https://stackoverflow.com/a/69031027
-                count=models.Func(F('id'), function='Count')
-            )
-            qs = qs.annotate(usage_count=models.Subquery(obj_tags.values('count')))
+            return self._add_counts(list(cast(list, qs)))  # type: ignore[return-value]
+
         return qs  # type: ignore[return-value]
 
     def _get_filtered_tags_deep(
@@ -616,17 +609,38 @@ class Taxonomy(models.Model):
         # ordering by it gives the tree sort order that we want.
         qs = qs.order_by("lineage")
         if include_counts:
-            # Including the counts is a bit tricky; see the comment above in _get_filtered_tags_one_level()
-            obj_tags = (
-                ObjectTag.objects.filter(tag_id=models.OuterRef("pk"))
-                .order_by()
-                .annotate(
-                    # We need to use Func() to get Count() without GROUP BY - see https://stackoverflow.com/a/69031027
-                    count=models.Func(F("id"), function="Count")
-                )
-            )
-            qs = qs.annotate(usage_count=models.Subquery(obj_tags.values("count")))
+            return self._add_counts(list(cast(list, qs)))  # type: ignore[return-value]
+
         return qs  # type: ignore[return-value]
+
+    def _add_counts(self, tag_data: list[dict]) -> list[dict]:
+        """
+        Add usage counts to a list of tag data dictionaries. For performance
+        reasons, we call this function with the list result of the
+        QuerySet so we can then add the counts in-memory rather than to a
+        QuerySet which would require a very expensive annotation to join the
+        in-memory data to the original QuerySet.
+        """
+
+        tag_lineage_dict = dict(self.tag_set.all().filter(taxonomy_id=self.id).values_list("value", "lineage"))
+        object_tags = self.objecttag_set.all().filter(taxonomy_id=self.id).values_list("_value", "object_id")
+        tag_counts: Counter[str] = Counter()
+        object_tag_lineage_seen: defaultdict[str, set] = defaultdict(set)
+
+        for tag_value, object_id in object_tags:
+            # split the lineages to get a dict of {tag.value: [lineages]}
+            lineage_tags = (t for t in tag_lineage_dict.get(tag_value, "").split('\t') if t)
+            # de-duplicate based on if the lineage is already 'seen' per object
+            unseen_tags = [t for t in lineage_tags if t not in object_tag_lineage_seen[object_id]]
+
+            tag_counts.update(unseen_tags)
+            object_tag_lineage_seen[object_id].update(unseen_tags)
+
+        # In-memory 'annotation'; this is faster than using annotate() on the QuerySet.
+        for row in tag_data:
+            row["usage_count"] = tag_counts.get(row["value"], 0)
+
+        return tag_data
 
     def add_tag(
         self,

@@ -755,17 +755,17 @@ class TestApiTagging(TestTagTaxonomyMixin, TestCase):
             "Archaea (used: 1, children: 2)",
             "  Euryarchaeida (used: 0, children: 0)",
             "  Proteoarchaeota (used: 0, children: 0)",
-            "Bacteria (used: 0, children: 1)",  # does not contain "cha" but a child does
+            "Bacteria (used: 1, children: 1)",  # does not contain "cha" but a child does
             "  Archaebacteria (used: 1, children: 0)",
         ]),
         ("ar", [
             "Archaea (used: 1, children: 2)",
             "  Euryarchaeida (used: 0, children: 0)",
             "  Proteoarchaeota (used: 0, children: 0)",
-            "Bacteria (used: 0, children: 1)",  # does not contain "ar" but a child does
+            "Bacteria (used: 1, children: 1)",  # does not contain "ar" but a child does
             "  Archaebacteria (used: 1, children: 0)",
-            "Eukaryota (used: 0, children: 1)",
-            "  Animalia (used: 1, children: 2)",  # does not contain "ar" but a child does
+            "Eukaryota (used: 6, children: 1)",
+            "  Animalia (used: 4, children: 2)",  # does not contain "ar" but a child does
             "    Arthropoda (used: 1, children: 0)",
             "    Cnidaria (used: 0, children: 0)",
         ]),
@@ -773,9 +773,9 @@ class TestApiTagging(TestTagTaxonomyMixin, TestCase):
             "Archaea (used: 1, children: 2)",
             "  Euryarchaeida (used: 0, children: 0)",
             "  Proteoarchaeota (used: 0, children: 0)",
-            "Bacteria (used: 0, children: 1)",  # does not contain "ae" but a child does
+            "Bacteria (used: 1, children: 1)",  # does not contain "ae" but a child does
             "  Archaebacteria (used: 1, children: 0)",
-            "Eukaryota (used: 0, children: 1)",  # does not contain "ae" but a child does
+            "Eukaryota (used: 6, children: 1)",  # does not contain "ae" but a child does
             "  Plantae (used: 1, children: 0)",
         ]),
         ("a", [
@@ -783,11 +783,11 @@ class TestApiTagging(TestTagTaxonomyMixin, TestCase):
             "  DPANN (used: 0, children: 0)",
             "  Euryarchaeida (used: 0, children: 0)",
             "  Proteoarchaeota (used: 0, children: 0)",
-            "Bacteria (used: 0, children: 2)",
+            "Bacteria (used: 1, children: 2)",
             "  Archaebacteria (used: 1, children: 0)",
             "  Eubacteria (used: 0, children: 0)",
-            "Eukaryota (used: 0, children: 4)",
-            "  Animalia (used: 1, children: 7)",
+            "Eukaryota (used: 6, children: 4)",
+            "  Animalia (used: 4, children: 7)",
             "    Arthropoda (used: 1, children: 0)",
             "    Chordata (used: 0, children: 1)",
             "      Mammalia (used: 0, children: 0)",
