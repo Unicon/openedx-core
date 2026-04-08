@@ -6,8 +6,7 @@ from __future__ import annotations
 
 import logging
 import re
-from collections import Counter, defaultdict
-from typing import List, Self, cast
+from typing import List, Self
 
 from django.core.exceptions import ValidationError
 from django.db import models
@@ -480,7 +479,7 @@ class Taxonomy(models.Model):
     def _get_filtered_tags_free_text(
         self,
         search_term: str | None,
-        include_counts: bool,
+        include_counts: bool,  # pylint: disable=unused-argument
     ) -> TagDataQuerySet:
         """
         Implementation of get_filtered_tags() for free text taxonomies.
@@ -500,16 +499,14 @@ class Taxonomy(models.Model):
             _id=Value(None, output_field=models.CharField()),
         )
         qs = qs.values("value", "child_count", "depth", "parent_value", "external_id", "_id").order_by("value")
-        if include_counts:
-            return qs.annotate(usage_count=models.Count("value"))
-        else:
-            return qs.distinct()  # type: ignore[return-value]
+
+        return qs.distinct()  # type: ignore[return-value]
 
     def _get_filtered_tags_one_level(
         self,
         parent_tag_value: str | None,
         search_term: str | None,
-        include_counts: bool,
+        include_counts: bool,  # pylint: disable=unused-argument
     ) -> TagDataQuerySet:
         """
         Implementation of get_filtered_tags() for closed taxonomies, where
@@ -532,8 +529,6 @@ class Taxonomy(models.Model):
         qs = qs.annotate(_id=F("id"))  # ID has an underscore to encourage use of 'value' rather than this internal ID
         qs = qs.values("value", "child_count", "depth", "parent_value", "external_id", "_id")
         qs = qs.order_by("value")
-        if include_counts:
-            return self._add_counts(list(cast(list, qs)))  # type: ignore[return-value]
 
         return qs  # type: ignore[return-value]
 
@@ -541,7 +536,7 @@ class Taxonomy(models.Model):
         self,
         parent_tag_value: str | None,
         search_term: str | None,
-        include_counts: bool,
+        include_counts: bool,  # pylint: disable=unused-argument
         excluded_values: list[str] | None,
     ) -> TagDataQuerySet:
         """
@@ -608,39 +603,8 @@ class Taxonomy(models.Model):
         # lineage is a case-insensitive column storing "Root\tParent\t...\tThisValue\t", so
         # ordering by it gives the tree sort order that we want.
         qs = qs.order_by("lineage")
-        if include_counts:
-            return self._add_counts(list(cast(list, qs)))  # type: ignore[return-value]
 
         return qs  # type: ignore[return-value]
-
-    def _add_counts(self, tag_data: list[dict]) -> list[dict]:
-        """
-        Add usage counts to a list of tag data dictionaries. For performance
-        reasons, we call this function with the list result of the
-        QuerySet so we can then add the counts in-memory rather than to a
-        QuerySet which would require a very expensive annotation to join the
-        in-memory data to the original QuerySet.
-        """
-
-        tag_lineage_dict = dict(self.tag_set.all().filter(taxonomy_id=self.id).values_list("value", "lineage"))
-        object_tags = self.objecttag_set.all().filter(taxonomy_id=self.id).values_list("_value", "object_id")
-        tag_counts: Counter[str] = Counter()
-        object_tag_lineage_seen: defaultdict[str, set] = defaultdict(set)
-
-        for tag_value, object_id in object_tags:
-            # split the lineages to get a dict of {tag.value: [lineages]}
-            lineage_tags = (t for t in tag_lineage_dict.get(tag_value, "").split('\t') if t)
-            # de-duplicate based on if the lineage is already 'seen' per object
-            unseen_tags = [t for t in lineage_tags if t not in object_tag_lineage_seen[object_id]]
-
-            tag_counts.update(unseen_tags)
-            object_tag_lineage_seen[object_id].update(unseen_tags)
-
-        # In-memory 'annotation'; this is faster than using annotate() on the QuerySet.
-        for row in tag_data:
-            row["usage_count"] = tag_counts.get(row["value"], 0)
-
-        return tag_data
 
     def add_tag(
         self,
