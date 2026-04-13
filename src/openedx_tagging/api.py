@@ -530,7 +530,7 @@ def add_usage_counts(taxonomy: Taxonomy, tag_data: TagDataQuerySet) -> TagDataQu
     """
     Add usage counts to the query result.
 
-    Not a simple raw count of each tags uasge. A tag can be directly
+    Not a simple raw count of each tags usage. A tag can be directly
     applied to an object, which can be a course, library, module,
     or something else.
 
