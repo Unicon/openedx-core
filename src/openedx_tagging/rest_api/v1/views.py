@@ -17,6 +17,7 @@ from rest_framework.viewsets import GenericViewSet, ModelViewSet
 from ...api import (
     TagDoesNotExist,
     add_tag_to_taxonomy,
+    add_usage_counts,
     create_taxonomy,
     delete_tags_from_taxonomy,
     get_object_tag_counts,
@@ -844,21 +845,33 @@ class TaxonomyTagsView(TaggingExceptionHandlerMixin, ListAPIView, RetrieveUpdate
             parent_tag_value=parent_tag_value,
             search_term=search_term,
             depth=depth,
-            include_counts=include_counts,
         )
         if depth == 1:
             # We're already returning just a single level. It will be paginated normally.
+            if include_counts:
+                results_with_counts = add_usage_counts(self.get_taxonomy(), results)
+                return results_with_counts
+
             return results
         elif full_depth_threshold and len(results) < full_depth_threshold:
             # We can load and display all the tags in this (sub)tree at once:
             self.pagination_class = DisabledTagsPagination
+            if include_counts:
+                results_with_counts = add_usage_counts(self.get_taxonomy(), results)
+                return results_with_counts
+
             return results
         else:
             # We had to do a deep query, but we will only return one level of results.
             # This is because the user did not request a deep response (via full_depth_threshold) or the result was too
             # large (larger than the threshold).
             # It will be paginated normally.
-            return results.filter(parent_value=parent_tag_value)
+            filtered_results = results.filter(parent_value=parent_tag_value)
+            if include_counts:
+                results_with_counts = add_usage_counts(self.get_taxonomy(), results)
+                return results_with_counts
+
+            return filtered_results
 
     def post(self, request, *args, **kwargs):
         """

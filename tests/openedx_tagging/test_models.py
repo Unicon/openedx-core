@@ -324,9 +324,9 @@ class TestFilteredTagsClosedTaxonomy(TestTagTaxonomyMixin, TestCase):
     def test_get_root(self) -> None:
         """
         Test basic retrieval of root tags in the closed taxonomy, using
-        get_filtered_tags(). Without counts included.
+        get_filtered_tags().
         """
-        result = list(self.taxonomy.get_filtered_tags(depth=1, include_counts=False))
+        result = list(self.taxonomy.get_filtered_tags(depth=1))
         common_fields = {"depth": 0, "parent_value": None, "external_id": None}
         for r in result:
             del r["_id"]  # Remove the internal database IDs; they aren't interesting here and a other tests check them
@@ -342,8 +342,8 @@ class TestFilteredTagsClosedTaxonomy(TestTagTaxonomyMixin, TestCase):
         Test basic retrieval of tags one level below the "Eukaryota" root tag in
         the closed taxonomy, using get_filtered_tags(). With counts included.
         """
-        result = list(self.taxonomy.get_filtered_tags(depth=1, parent_tag_value="Eukaryota", include_counts=True))
-        common_fields = {"depth": 1, "parent_value": "Eukaryota", "usage_count": 0, "external_id": None}
+        result = list(self.taxonomy.get_filtered_tags(depth=1, parent_tag_value="Eukaryota"))
+        common_fields = {"depth": 1, "parent_value": "Eukaryota", "external_id": None}
         for r in result:
             del r["_id"]  # Remove the internal database IDs; they aren't interesting here and a other tests check them
         assert result == [
@@ -379,13 +379,12 @@ class TestFilteredTagsClosedTaxonomy(TestTagTaxonomyMixin, TestCase):
         """
         Filter the root tags to only those that match a search term
         """
-        result = list(self.taxonomy.get_filtered_tags(depth=1, search_term="ARCH", include_counts=True))
+        result = list(self.taxonomy.get_filtered_tags(depth=1, search_term="ARCH"))
         assert result == [
             {
                 "value": "Archaea",
                 "child_count": 3,
                 "depth": 0,
-                "usage_count": 0,
                 "parent_value": None,
                 "external_id": None,
                 "_id": 2,  # These IDs are hard-coded in the test fixture file
@@ -504,13 +503,12 @@ class TestFilteredTagsClosedTaxonomy(TestTagTaxonomyMixin, TestCase):
         """
         Test getting a deep tag in the taxonomy
         """
-        result = list(self.taxonomy.get_filtered_tags(parent_tag_value="Chordata", include_counts=True))
+        result = list(self.taxonomy.get_filtered_tags(parent_tag_value="Chordata"))
         assert result == [
             {
                 "value": "Mammalia",
                 "parent_value": "Chordata",
                 "depth": 3,
-                "usage_count": 0,
                 "child_count": 0,
                 "external_id": None,
                 "_id": 21,  # These IDs are hard-coded in the test fixture file
@@ -542,29 +540,6 @@ class TestFilteredTagsClosedTaxonomy(TestTagTaxonomyMixin, TestCase):
         result = list(self.taxonomy.get_filtered_tags(search_term="Eubacteria"))
         assert result[0]["value"] == "Bacteria"
         assert result[0]["external_id"] == "bct001"
-
-    def test_usage_count(self) -> None:
-        """
-        Test that the usage count in the results is right
-        """
-        api.tag_object(object_id="obj01", taxonomy=self.taxonomy, tags=["Bacteria"])
-        api.tag_object(object_id="obj02", taxonomy=self.taxonomy, tags=["Bacteria"])
-        api.tag_object(object_id="obj03", taxonomy=self.taxonomy, tags=["Bacteria"])
-        api.tag_object(object_id="obj04", taxonomy=self.taxonomy, tags=["Eubacteria"])
-        # Now the API should reflect these usage counts:
-        result = pretty_format_tags(self.taxonomy.get_filtered_tags(search_term="bacteria", include_counts=True))
-        assert result == [
-            "Bacteria (None) (used: 3, children: 2)",
-            "  Archaebacteria (Bacteria) (used: 0, children: 0)",
-            "  Eubacteria (Bacteria) (used: 1, children: 0)",
-        ]
-        # Same with depth=1, which uses a different query internally:
-        result1 = pretty_format_tags(
-            self.taxonomy.get_filtered_tags(search_term="bacteria", include_counts=True, depth=1)
-        )
-        assert result1 == [
-            "Bacteria (None) (used: 3, children: 2)",
-        ]
 
     def test_tree_sort(self) -> None:
         """
@@ -615,29 +590,14 @@ class TestFilteredTagsFreeTextTaxonomy(TestCase):
     def test_get_filtered_tags(self):
         """
         Test basic retrieval of all tags in the taxonomy.
-        Without counts included.
         """
-        result = list(self.taxonomy.get_filtered_tags(include_counts=False))
+        result = list(self.taxonomy.get_filtered_tags())
         common_fields = {"child_count": 0, "depth": 0, "parent_value": None, "external_id": None, "_id": None}
         assert result == [
             # These should appear in alphabetical order:
             {"value": "double", **common_fields},
             {"value": "solo", **common_fields},
             {"value": "triple", **common_fields},
-        ]
-
-    def test_get_filtered_tags_with_count(self):
-        """
-        Test basic retrieval of all tags in the taxonomy.
-        Without counts included.
-        """
-        result = list(self.taxonomy.get_filtered_tags(include_counts=True))
-        common_fields = {"child_count": 0, "depth": 0, "parent_value": None, "external_id": None, "_id": None}
-        assert result == [
-            # These should appear in alphabetical order:
-            {"value": "double", "usage_count": 2, **common_fields},
-            {"value": "solo", "usage_count": 1, **common_fields},
-            {"value": "triple", "usage_count": 3, **common_fields},
         ]
 
     def test_get_filtered_tags_num_queries(self):
@@ -647,22 +607,20 @@ class TestFilteredTagsFreeTextTaxonomy(TestCase):
         """
         with self.assertNumQueries(1):
             self.test_get_filtered_tags()
-        with self.assertNumQueries(1):
-            self.test_get_filtered_tags_with_count()
 
     def test_get_filtered_tags_with_search(self) -> None:
         """
         Test basic retrieval of only matching tags.
         """
-        result1 = list(self.taxonomy.get_filtered_tags(search_term="le", include_counts=True))
+        result1 = list(self.taxonomy.get_filtered_tags(search_term="le"))
         common_fields = {"child_count": 0, "depth": 0, "parent_value": None, "external_id": None, "_id": None}
         assert result1 == [
             # These should appear in alphabetical order:
-            {"value": "double", "usage_count": 2, **common_fields},
-            {"value": "triple", "usage_count": 3, **common_fields},
+            {"value": "double", **common_fields},
+            {"value": "triple", **common_fields},
         ]
         # And it should be case insensitive:
-        result2 = list(self.taxonomy.get_filtered_tags(search_term="LE", include_counts=True))
+        result2 = list(self.taxonomy.get_filtered_tags(search_term="LE"))
         assert result1 == result2
 
 
