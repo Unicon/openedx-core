@@ -35,6 +35,7 @@ from ...models import Tag, Taxonomy
 from ...rules import ObjectTagPermissionItem
 from ..paginators import MAX_FULL_DEPTH_THRESHOLD, DisabledTagsPagination, TagsPagination, TaxonomyPagination
 from ..utils import view_auth_classes
+from .exception_handlers import TaggingExceptionHandlerMixin
 from .permissions import ObjectTagObjectPermissions, TaxonomyObjectPermissions, TaxonomyTagsObjectPermissions
 from .serializers import (
     ObjectTagListQueryParamsSerializer,
@@ -56,7 +57,7 @@ from .serializers import (
 
 
 @view_auth_classes
-class TaxonomyView(ModelViewSet):
+class TaxonomyView(TaggingExceptionHandlerMixin, ModelViewSet):
     """
     View to list, create, retrieve, update, delete, export or import Taxonomies.
 
@@ -641,7 +642,7 @@ class ObjectTagCountsView(
 
 
 @view_auth_classes
-class TaxonomyTagsView(ListAPIView, RetrieveUpdateDestroyAPIView):
+class TaxonomyTagsView(TaggingExceptionHandlerMixin, ListAPIView, RetrieveUpdateDestroyAPIView):
     """
     View to list/create/update/delete tags of a taxonomy.
 
@@ -878,7 +879,8 @@ class TaxonomyTagsView(ListAPIView, RetrieveUpdateDestroyAPIView):
         """
         taxonomy = self.get_taxonomy()
 
-        body = TaxonomyTagCreateBodySerializer(data=request.data)
+        serializer_context = self.get_serializer_context()
+        body = TaxonomyTagCreateBodySerializer(data=request.data, context=serializer_context)
         body.is_valid(raise_exception=True)
 
         tag = body.data.get("tag")
@@ -894,7 +896,6 @@ class TaxonomyTagsView(ListAPIView, RetrieveUpdateDestroyAPIView):
         except ValueError as e:
             raise ValidationError(e) from e
 
-        serializer_context = self.get_serializer_context()
         return Response(
             self.serializer_class(new_tag, context=serializer_context).data,
             status=status.HTTP_201_CREATED
@@ -907,7 +908,8 @@ class TaxonomyTagsView(ListAPIView, RetrieveUpdateDestroyAPIView):
         """
         taxonomy = self.get_taxonomy()
 
-        body = TaxonomyTagUpdateBodySerializer(data=request.data)
+        serializer_context = self.get_serializer_context()
+        body = TaxonomyTagUpdateBodySerializer(data=request.data, context=serializer_context)
         body.is_valid(raise_exception=True)
 
         tag = body.data.get("tag")
@@ -920,7 +922,6 @@ class TaxonomyTagsView(ListAPIView, RetrieveUpdateDestroyAPIView):
         except ValueError as e:
             raise ValidationError(e) from e
 
-        serializer_context = self.get_serializer_context()
         return Response(
             self.serializer_class(updated_tag, context=serializer_context).data,
             status=status.HTTP_200_OK
@@ -934,7 +935,8 @@ class TaxonomyTagsView(ListAPIView, RetrieveUpdateDestroyAPIView):
         """
         taxonomy = self.get_taxonomy()
 
-        body = TaxonomyTagDeleteBodySerializer(data=request.data)
+        serializer_context = self.get_serializer_context()
+        body = TaxonomyTagDeleteBodySerializer(data=request.data, context=serializer_context)
         body.is_valid(raise_exception=True)
 
         tags = body.data.get("tags")
