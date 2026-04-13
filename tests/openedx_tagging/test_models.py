@@ -321,9 +321,9 @@ class TestFilteredTagsClosedTaxonomy(TestTagTaxonomyMixin, TestCase):
     def test_get_root(self) -> None:
         """
         Test basic retrieval of root tags in the closed taxonomy, using
-        get_filtered_tags(). Without counts included.
+        get_filtered_tags().
         """
-        result = list(self.taxonomy.get_filtered_tags(depth=1, include_counts=False))
+        result = list(self.taxonomy.get_filtered_tags(depth=1))
         common_fields = {"depth": 0, "parent_value": None, "external_id": None}
         for r in result:
             del r["_id"]  # Remove the internal database IDs; they aren't interesting here and a other tests check them
@@ -587,9 +587,8 @@ class TestFilteredTagsFreeTextTaxonomy(TestCase):
     def test_get_filtered_tags(self):
         """
         Test basic retrieval of all tags in the taxonomy.
-        Without counts included.
         """
-        result = list(self.taxonomy.get_filtered_tags(include_counts=False))
+        result = list(self.taxonomy.get_filtered_tags())
         common_fields = {"child_count": 0, "depth": 0, "parent_value": None, "external_id": None, "_id": None}
         assert result == [
             # These should appear in alphabetical order:
@@ -610,7 +609,7 @@ class TestFilteredTagsFreeTextTaxonomy(TestCase):
         """
         Test basic retrieval of only matching tags.
         """
-        result1 = list(self.taxonomy.get_filtered_tags(search_term="le", include_counts=True))
+        result1 = list(self.taxonomy.get_filtered_tags(search_term="le"))
         common_fields = {"child_count": 0, "depth": 0, "parent_value": None, "external_id": None, "_id": None}
         assert result1 == [
             # These should appear in alphabetical order:
@@ -618,7 +617,7 @@ class TestFilteredTagsFreeTextTaxonomy(TestCase):
             {"value": "triple", **common_fields},
         ]
         # And it should be case insensitive:
-        result2 = list(self.taxonomy.get_filtered_tags(search_term="LE", include_counts=True))
+        result2 = list(self.taxonomy.get_filtered_tags(search_term="LE"))
         assert result1 == result2
 
 

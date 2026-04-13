@@ -3,8 +3,6 @@ Tagging API Views
 """
 from __future__ import annotations
 
-from collections import Counter, defaultdict
-
 from django.core import exceptions
 from django.db import models
 from django.http import Http404, HttpResponse
@@ -19,6 +17,7 @@ from rest_framework.viewsets import GenericViewSet, ModelViewSet
 from ...api import (
     TagDoesNotExist,
     add_tag_to_taxonomy,
+    add_usage_counts,
     create_taxonomy,
     delete_tags_from_taxonomy,
     get_object_tag_counts,
@@ -845,18 +844,21 @@ class TaxonomyTagsView(ListAPIView, RetrieveUpdateDestroyAPIView):
             parent_tag_value=parent_tag_value,
             search_term=search_term,
             depth=depth,
-            include_counts=include_counts,
         )
         if depth == 1:
             # We're already returning just a single level. It will be paginated normally.
             if include_counts:
-                return self._add_counts(results)
+                results_with_counts = add_usage_counts(self.get_taxonomy(), results)
+                return results_with_counts
+
             return results
         elif full_depth_threshold and len(results) < full_depth_threshold:
             # We can load and display all the tags in this (sub)tree at once:
             self.pagination_class = DisabledTagsPagination
             if include_counts:
-                return self._add_counts(results)
+                results_with_counts = add_usage_counts(self.get_taxonomy(), results)
+                return results_with_counts
+
             return results
         else:
             # We had to do a deep query, but we will only return one level of results.
@@ -865,38 +867,10 @@ class TaxonomyTagsView(ListAPIView, RetrieveUpdateDestroyAPIView):
             # It will be paginated normally.
             filtered_results = results.filter(parent_value=parent_tag_value)
             if include_counts:
-                return self._add_counts(filtered_results)
+                results_with_counts = add_usage_counts(self.get_taxonomy(), results)
+                return results_with_counts
 
             return filtered_results
-
-    def _add_counts(self, tag_data: TagDataQuerySet) -> TagDataQuerySet:
-        """
-        Add usage counts to a list of tag data dictionaries. For performance
-        reasons, we call this function with the list result of the
-        QuerySet so we can then add the counts in-memory rather than to a
-        QuerySet which would require a very expensive annotation to join the
-        in-memory data to the original QuerySet.
-        """
-
-        taxonomy = self.get_taxonomy()
-        object_tags = taxonomy.objecttag_set.values_list("object_id", "tag__lineage")
-        tag_counts: Counter[str] = Counter()
-        object_tag_lineage_seen: defaultdict[str, set] = defaultdict(set)
-
-        for object_id, tag_lineage in object_tags:
-            # split the lineages to get a dict of {tag.value: [lineages]}
-            lineage_tags = list(tag_lineage.split('\t')) if tag_lineage else []
-            # de-duplicate based on if the lineage is already 'seen' per object
-            unseen_tags = [t for t in lineage_tags if t not in object_tag_lineage_seen[object_id]]
-
-            tag_counts.update(unseen_tags)
-            object_tag_lineage_seen[object_id].update(unseen_tags)
-
-        # In-memory 'annotation'; this is faster than using annotate() on the QuerySet.
-        for row in tag_data:
-            row["usage_count"] = tag_counts.get(row["value"], 0)
-
-        return tag_data
 
     def post(self, request, *args, **kwargs):
         """

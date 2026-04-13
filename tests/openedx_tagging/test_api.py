@@ -817,7 +817,7 @@ class TestApiTagging(TestTagTaxonomyMixin, TestCase):
                 _value=value,
             ).save()
 
-        result = tagging_api.search_tags(closed_taxonomy, search, include_counts=True)
+        result = tagging_api.search_tags(closed_taxonomy, search)
         assert pretty_format_tags(result, parent=False) == expected
 
     def test_autocomplete_tags_closed_omit_object(self) -> None:

@@ -426,7 +426,6 @@ class Taxonomy(models.Model):
         depth: int | None = None,
         parent_tag_value: str | None = None,
         search_term: str | None = None,
-        include_counts: bool = False,
         excluded_values: list[str] | None = None,
     ) -> TagDataQuerySet:
         """
@@ -451,7 +450,7 @@ class Taxonomy(models.Model):
         if self.allow_free_text:
             if parent_tag_value is not None:
                 raise ValueError("Cannot specify a parent tag ID for free text taxonomies")
-            result = self._get_filtered_tags_free_text(search_term=search_term, include_counts=include_counts)
+            result = self._get_filtered_tags_free_text(search_term=search_term)
             if excluded_values:
                 return result.exclude(value__in=excluded_values)
             else:
@@ -460,7 +459,6 @@ class Taxonomy(models.Model):
             result = self._get_filtered_tags_one_level(
                 parent_tag_value=parent_tag_value,
                 search_term=search_term,
-                include_counts=include_counts,
             )
             if excluded_values:
                 return result.exclude(value__in=excluded_values)
@@ -470,7 +468,6 @@ class Taxonomy(models.Model):
             return self._get_filtered_tags_deep(
                 parent_tag_value=parent_tag_value,
                 search_term=search_term,
-                include_counts=include_counts,
                 excluded_values=excluded_values,
             )
         else:
@@ -479,7 +476,6 @@ class Taxonomy(models.Model):
     def _get_filtered_tags_free_text(
         self,
         search_term: str | None,
-        include_counts: bool,  # pylint: disable=unused-argument
     ) -> TagDataQuerySet:
         """
         Implementation of get_filtered_tags() for free text taxonomies.
@@ -506,7 +502,6 @@ class Taxonomy(models.Model):
         self,
         parent_tag_value: str | None,
         search_term: str | None,
-        include_counts: bool,  # pylint: disable=unused-argument
     ) -> TagDataQuerySet:
         """
         Implementation of get_filtered_tags() for closed taxonomies, where
@@ -536,7 +531,6 @@ class Taxonomy(models.Model):
         self,
         parent_tag_value: str | None,
         search_term: str | None,
-        include_counts: bool,  # pylint: disable=unused-argument
         excluded_values: list[str] | None,
     ) -> TagDataQuerySet:
         """

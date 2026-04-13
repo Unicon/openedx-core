@@ -2448,10 +2448,12 @@ class TestTaxonomyTagsView(TestTaxonomyViewMixin):
 
 class TestTaxonomyTagsUsageCount(TestTaxonomyViewMixin):
     """
-    Tests the usage_count rollup logic in the taxonomy tags view
+    Tests the usage count of tags in a taxonomy, verifies that the
+    usage count is correct according to the rules as described in the
+    comments in src/openedx_tagging/api.py:add_usage_counts()
     """
 
-    # Taxonomy reference
+    # Taxonomy reference as used in tests below
     #
     # - Bacteria
     #    |- Eubacteria
@@ -2484,10 +2486,15 @@ class TestTaxonomyTagsUsageCount(TestTaxonomyViewMixin):
         self.taxonomy = Taxonomy.objects.create(name="Usage Count Taxonomy")
         self.taxonomy_url = TAXONOMY_TAGS_URL.format(pk=self.taxonomy.pk)
 
-    def test_usage_count_rollup(self):
+    def test_simple_usage_count_with_lineage_and_deduplication(self):
         """
-        Test that usage counts correctly roll up from children to parents,
-        while deduplicating multiple tags on the same object.
+        Test that usage counts correctly 'roll up' from children to parents,
+        while deduplicating multiple tags applied to the same object.
+
+        This test is a basic case to verify that the tags are correctly
+        counted according to business rules and deduplication
+        requirements; Animalia and Eukaryota should not be counted
+        more than once per object, the children should be counted once each.
         """
         # --- Setup Hierarchy ---
         # Eukaryota -> Animalia -> (Arthropoda, Chordata, Cnidaria)
@@ -2535,10 +2542,13 @@ class TestTaxonomyTagsUsageCount(TestTaxonomyViewMixin):
         # Eukaryota: same logic as Animalia -> count: 2
         assert results["Eukaryota"]["usage_count"] == 2
 
-    def test_usage_count_rollup_multi_level(self):
+    def test_usage_count_through_multiple_levels(self):
         """
-        Test that usage counts correctly roll up across more than two levels
-        of hierarchy.
+        Test that usage count is correctly calculated across multiple levels.
+        Apply a simple set of tags to some objects and verify that the
+        usage_counts are correctly calculated, verifying that the ancestor
+        tags are correctly applied and de-deuplicated across the entire depth
+        of the taxonomy
         """
         # --- Setup Hierarchy ---
         # Eukaryota -> Animalia -> Chordata -> Mammalia
@@ -2570,7 +2580,7 @@ class TestTaxonomyTagsUsageCount(TestTaxonomyViewMixin):
         # Eukaryota: obj1 (via Mammalia), obj2 (via Chordata) -> 2
         assert results["Eukaryota"]["usage_count"] == 2
 
-    def test_usage_count_no_rollup_different_objects(self):
+    def test_usage_count_across_different_objects(self):
         """
         Verify that counts are not erroneously shared between different objects
         that are tagged with distinct branches of the same hierarchy.
@@ -2600,10 +2610,10 @@ class TestTaxonomyTagsUsageCount(TestTaxonomyViewMixin):
         # Eukaryota should have 2 because it's used on obj1 (via Animalia) and obj2 (via Fungi)
         assert results["Eukaryota"]["usage_count"] == 2
 
-    def test_usage_count_max_depth_rollup(self):
+    def test_usage_count_max_depth(self):
         """
-        Verify usage_count rollup up to the maximum depth of 7,
-        ensuring redundant tagging on the same object is deduplicated.
+        Verify usage_count up to the maximum depth of 7, ensuring redundant
+        tagging on the same object is deduplicated.
         """
         # --- Setup Hierarchy (6 Levels) ---
         # Eukaryota -> Animalia -> Chordata -> Mammalia -> Carnivora -> Felidae
@@ -2643,9 +2653,10 @@ class TestTaxonomyTagsUsageCount(TestTaxonomyViewMixin):
         # Eukaryota: obj1 (via Animalia), obj2 (via Animalia) -> 2
         assert results["Eukaryota"]["usage_count"] == 2
 
-    def test_usage_count_one_level_root_and_child_rollup(self):
+    def test_usage_count_only_at_root_when_child_applied(self):
         """
-        Verify that usage counts roll up even when querying only a single level.
+        Verify that usage_count for a tag is correct, even if we only query for
+        the root level tag and is only used indirectly because a child is applied.
         """
         # Eukaryota -> Animalia -> Chordata
         eukaryota = Tag.objects.create(taxonomy=self.taxonomy, value="Eukaryota")
