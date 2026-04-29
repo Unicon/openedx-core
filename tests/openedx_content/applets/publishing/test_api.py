@@ -3,6 +3,7 @@ Tests of the Publishing app's python API
 """
 from __future__ import annotations
 
+from contextlib import nullcontext
 from datetime import datetime, timezone
 from typing import Any
 from uuid import UUID
@@ -10,7 +11,7 @@ from uuid import UUID
 import pytest
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError
-from django.test import TestCase
+from django.test import TestCase, TransactionTestCase
 
 from openedx_content.applets.containers import api as containers_api
 from openedx_content.applets.publishing import api as publishing_api
@@ -284,6 +285,12 @@ class DraftTestCase(TestCase):
         assert DraftChangeLog.objects.count() == 2
 
     def test_reset_drafts_to_published(self) -> None:
+        self.inner_reset_drafts_to_published(bulk=False)
+
+    def test_reset_drafts_to_published_bulk(self) -> None:
+        self.inner_reset_drafts_to_published(bulk=True)
+
+    def inner_reset_drafts_to_published(self, bulk: bool) -> None:
         """
         Test throwing out Draft data and resetting to the Published versions.
 
@@ -303,102 +310,108 @@ class DraftTestCase(TestCase):
         wanted to make sure nothing went wrong when multiple types of reset were
         happening at the same time.
         """
-        # This is the Entity that's going to get a couple of new versions
-        # between Draft and Published.
-        entity_with_changes = publishing_api.create_publishable_entity(
-            self.learning_package_1.id,
-            "entity_with_changes",
-            created=self.now,
-            created_by=None,
-        )
-        publishing_api.create_publishable_entity_version(
-            entity_with_changes.id,
-            version_num=1,
-            title="I'm entity_with_changes v1",
-            created=self.now,
-            created_by=None,
-        )
-
-        # This Entity is going to remain unchanged between Draft and Published.
-        entity_with_no_changes = publishing_api.create_publishable_entity(
-            self.learning_package_1.id,
-            "entity_with_no_changes",
-            created=self.now,
-            created_by=None,
-        )
-        publishing_api.create_publishable_entity_version(
-            entity_with_no_changes.id,
-            version_num=1,
-            title="I'm entity_with_no_changes v1",
-            created=self.now,
-            created_by=None,
-        )
-
-        # This Entity will be Published, but will then be soft-deleted.
-        entity_with_pending_delete = publishing_api.create_publishable_entity(
-            self.learning_package_1.id,
-            "entity_with_pending_delete",
-            created=self.now,
-            created_by=None,
-        )
-        publishing_api.create_publishable_entity_version(
-            entity_with_pending_delete.id,
-            version_num=1,
-            title="I'm entity_with_pending_delete v1",
-            created=self.now,
-            created_by=None,
-        )
-
-        # Publish!
-        publishing_api.publish_all_drafts(self.learning_package_1.id)
-
-        # Create versions 2, 3, 4 of entity_with_changes. After this, the
-        # Published version is 1 and the Draft version is 4.
-        for version_num in range(2, 5):
+        with (publishing_api.bulk_draft_changes_for(self.learning_package_1.id) if bulk else nullcontext()):
+            # This is the Entity that's going to get a couple of new versions
+            # between Draft and Published.
+            entity_with_changes = publishing_api.create_publishable_entity(
+                self.learning_package_1.id,
+                "entity_with_changes",
+                created=self.now,
+                created_by=None,
+            )
             publishing_api.create_publishable_entity_version(
                 entity_with_changes.id,
-                version_num=version_num,
-                title=f"I'm entity_with_changes v{version_num}",
+                version_num=1,
+                title="I'm entity_with_changes v1",
                 created=self.now,
                 created_by=None,
             )
 
-        # Soft-delete entity_with_pending_delete. After this, the Published
-        # version is 1 and the Draft version is None.
-        publishing_api.soft_delete_draft(entity_with_pending_delete.id)
+            # This Entity is going to remain unchanged between Draft and Published.
+            entity_with_no_changes = publishing_api.create_publishable_entity(
+                self.learning_package_1.id,
+                "entity_with_no_changes",
+                created=self.now,
+                created_by=None,
+            )
+            publishing_api.create_publishable_entity_version(
+                entity_with_no_changes.id,
+                version_num=1,
+                title="I'm entity_with_no_changes v1",
+                created=self.now,
+                created_by=None,
+            )
 
-        # Create a new entity that only exists in Draft form (no Published
-        # version).
-        new_entity = publishing_api.create_publishable_entity(
-            self.learning_package_1.id,
-            "new_entity",
-            created=self.now,
-            created_by=None,
-        )
-        publishing_api.create_publishable_entity_version(
-            new_entity.id,
-            version_num=1,
-            title="I'm new_entity v1",
-            created=self.now,
-            created_by=None,
-        )
+            # This Entity will be Published, but will then be soft-deleted.
+            entity_with_pending_delete = publishing_api.create_publishable_entity(
+                self.learning_package_1.id,
+                "entity_with_pending_delete",
+                created=self.now,
+                created_by=None,
+            )
+            publishing_api.create_publishable_entity_version(
+                entity_with_pending_delete.id,
+                version_num=1,
+                title="I'm entity_with_pending_delete v1",
+                created=self.now,
+                created_by=None,
+            )
 
-        # The versions we expect in (entity, published version_num, draft
-        # version_num) tuples.
-        expected_pre_reset_state = [
-            (entity_with_changes, 1, 4),
-            (entity_with_no_changes, 1, 1),
-            (entity_with_pending_delete, 1, None),
-            (new_entity, None, 1),
-        ]
-        for entity, pub_version_num, draft_version_num in expected_pre_reset_state:
-            # Make sure we grab a new copy from the database so we're not
-            # getting stale cached values:
-            assert pub_version_num == self._get_published_version_num(entity)
-            assert draft_version_num == self._get_draft_version_num(entity)
+        if bulk:
+            # bulk_draft_changes_for creates only one DraftChangeLog for all the preceeding operations
+            assert DraftChangeLog.objects.count() == 1
 
-        # Now reset to draft here!
-        publishing_api.reset_drafts_to_published(self.learning_package_1.id)
+        # Publish!
+        publishing_api.publish_all_drafts(self.learning_package_1.id)
+
+        with (publishing_api.bulk_draft_changes_for(self.learning_package_1.id) if bulk else nullcontext()) as changes2:
+            # Create versions 2, 3, 4 of entity_with_changes. After this, the
+            # Published version is 1 and the Draft version is 4.
+            for version_num in range(2, 5):
+                publishing_api.create_publishable_entity_version(
+                    entity_with_changes.id,
+                    version_num=version_num,
+                    title=f"I'm entity_with_changes v{version_num}",
+                    created=self.now,
+                    created_by=None,
+                )
+
+            # Soft-delete entity_with_pending_delete. After this, the Published
+            # version is 1 and the Draft version is None.
+            publishing_api.soft_delete_draft(entity_with_pending_delete.id)
+
+            # Create a new entity that only exists in Draft form (no Published
+            # version).
+            new_entity = publishing_api.create_publishable_entity(
+                self.learning_package_1.id,
+                "new_entity",
+                created=self.now,
+                created_by=None,
+            )
+            publishing_api.create_publishable_entity_version(
+                new_entity.id,
+                version_num=1,
+                title="I'm new_entity v1",
+                created=self.now,
+                created_by=None,
+            )
+
+            # The versions we expect in (entity, published version_num, draft
+            # version_num) tuples.
+            expected_pre_reset_state = [
+                (entity_with_changes, 1, 4),
+                (entity_with_no_changes, 1, 1),
+                (entity_with_pending_delete, 1, None),
+                (new_entity, None, 1),
+            ]
+            for entity, pub_version_num, draft_version_num in expected_pre_reset_state:
+                # Make sure we grab a new copy from the database so we're not
+                # getting stale cached values:
+                assert pub_version_num == self._get_published_version_num(entity)
+                assert draft_version_num == self._get_draft_version_num(entity)
+
+            # Now reset to draft here!
+            publishing_api.reset_drafts_to_published(self.learning_package_1.id)
 
         # Versions we expect after reset in (entity, published version num)
         # tuples. The only entity that is not version 1 is the new one.
@@ -415,11 +428,11 @@ class DraftTestCase(TestCase):
                 pub_version_num
             )
 
-    def test_reset_drafts_to_published_bulk(self) -> None:
-        """bulk_draft_changes_for creates only one DraftChangeLog."""
-        with publishing_api.bulk_draft_changes_for(self.learning_package_1.id):
-            self.test_reset_drafts_to_published()
-        assert DraftChangeLog.objects.count() == 1
+        if bulk:
+            # The second half of this test has no net effect because it just resets to the published version
+            # The DraftChangeLog (changes2) was created and then deleted.
+            assert changes2.pk is None  # type: ignore[union-attr]
+            assert DraftChangeLog.objects.count() == 1
 
     def test_get_entities_with_unpublished_changes(self) -> None:
         """Test fetching entities with unpublished changes after soft deletes."""
@@ -1038,7 +1051,7 @@ class EntitiesQueryTestCase(TestCase):
                 created=cls.now,
                 created_by=None,
             )
-            publishing_api.publish_all_drafts(cls.learning_package_1.id)
+        publishing_api.publish_all_drafts(cls.learning_package_1.id)
 
     def test_get_publishable_entities(self) -> None:
         """
@@ -2345,3 +2358,214 @@ class TestContainerSideEffects(TestCase):
 # Test that I can get a [PublishLog] history of a given container and its children, that includes changes made to the
 #     child components while they were part of the container but excludes changes made to those children while they were
 #     not part of the container. 🫣
+
+
+class CrossEntityValidationTestCase(TransactionTestCase):
+    """
+    Tests for validation gaps where API calls can corrupt state by mixing
+    entities/versions/packages that shouldn't be combined.
+    """
+
+    now: datetime
+    learning_package_1: LearningPackage
+    learning_package_2: LearningPackage
+
+    def setUp(self):
+        super().setUp()
+        self.now = datetime(2024, 6, 15, 12, 0, 0, tzinfo=timezone.utc)
+        self.learning_package_1 = publishing_api.create_learning_package(
+            "cross_entity_validation_lp_1",
+            "Cross-Entity Validation LP 1",
+            created=self.now,
+        )
+        self.learning_package_2 = publishing_api.create_learning_package(
+            "cross_entity_validation_lp_2",
+            "Cross-Entity Validation LP 2",
+            created=self.now,
+        )
+
+    def test_set_draft_version_rejects_version_from_different_entity(self) -> None:
+        """
+        set_draft_version() should reject a PublishableEntityVersion that
+        belongs to a different PublishableEntity.
+
+        If this validation is missing, entity_a's Draft will point to a version
+        that was defined for entity_b. This corrupts the publishing state:
+        component_a.versioning.draft would return component_b's data, and
+        publishing would propagate the wrong content.
+        """
+        entity_a = publishing_api.create_publishable_entity(
+            self.learning_package_1.id,
+            "entity_a",
+            created=self.now,
+            created_by=None,
+        )
+        entity_b = publishing_api.create_publishable_entity(
+            self.learning_package_1.id,
+            "entity_b",
+            created=self.now,
+            created_by=None,
+        )
+
+        # Create v1 for entity_a (draft_a -> v1)
+        publishing_api.create_publishable_entity_version(
+            entity_a.id,
+            version_num=1,
+            title="Entity A v1",
+            created=self.now,
+            created_by=None,
+        )
+
+        # Create v1 and v2 for entity_b. After v2 is created, entity_b's
+        # draft points to v2, so v1 is "free" (no Draft points to it) and
+        # won't trigger a OneToOne constraint violation.
+        version_b_v1 = publishing_api.create_publishable_entity_version(
+            entity_b.id,
+            version_num=1,
+            title="Entity B v1",
+            created=self.now,
+            created_by=None,
+        )
+        publishing_api.create_publishable_entity_version(
+            entity_b.id,
+            version_num=2,
+            title="Entity B v2",
+            created=self.now,
+            created_by=None,
+        )
+
+        # Confirm version_b_v1 belongs to entity_b, not entity_a.
+        assert version_b_v1.entity_id == entity_b.id
+        assert version_b_v1.entity_id != entity_a.id
+
+        # This should raise an error because version_b_v1 belongs to entity_b,
+        # not entity_a. Without validation, this silently corrupts entity_a's
+        # draft to point to entity_b's content.
+        with pytest.raises(
+            ValidationError,
+            match=(
+                r"Entity mismatch - the specified PublishableEntityVersion "
+                r"\(<PublishableEntityVersion: entity_b @ v1 - Entity B v1>\) does not match the "
+                r"PublishableEntity \(<PublishableEntity: entity_a>\)."
+            ),
+        ):
+            publishing_api.set_draft_version(entity_a.id, version_b_v1.pk)
+
+    def test_publish_from_drafts_rejects_cross_package_drafts(self) -> None:
+        """
+        publish_from_drafts() should reject drafts that don't belong to the
+        specified LearningPackage.
+
+        If this validation is missing, a PublishLog is created for LP 1 but
+        with PublishLogRecords referencing entities from LP 2. The Published
+        rows for LP 2's entities would point to records in LP 1's PublishLog,
+        corrupting the publish history for both packages.
+        """
+        # Create an entity in LP 2
+        entity_in_lp2 = publishing_api.create_publishable_entity(
+            self.learning_package_2.id,
+            "entity_in_lp2",
+            created=self.now,
+            created_by=None,
+        )
+        publishing_api.create_publishable_entity_version(
+            entity_in_lp2.id,
+            version_num=1,
+            title="Entity in LP2",
+            created=self.now,
+            created_by=None,
+        )
+
+        # Get drafts from LP 2
+        drafts_from_lp2 = Draft.objects.filter(entity__learning_package_id=self.learning_package_2.id)
+        assert drafts_from_lp2.exists()
+
+        # This should raise an error because we're trying to publish LP 2's
+        # drafts under LP 1's PublishLog.
+        with pytest.raises(
+            ValidationError,
+            match=r"Draft entity \(id=\d+\) is from learning package \d+; expected learning package \d+.",
+        ):
+            publishing_api.publish_from_drafts(
+                self.learning_package_1.id,
+                drafts_from_lp2,
+            )
+
+    def test_create_version_rejects_cross_package_dependencies(self) -> None:
+        """
+        create_publishable_entity_version() should reject dependencies that
+        are from a different LearningPackage.
+
+        If this validation is missing, PublishableEntityVersionDependency rows
+        are created linking entities across packages. The side-effect machinery
+        would then propagate draft/publish changes across LearningPackage
+        boundaries, creating DraftChangeLogRecords and PublishLogRecords in the
+        wrong package's logs.
+        """
+        entity_in_lp1 = publishing_api.create_publishable_entity(
+            self.learning_package_1.id,
+            "entity_in_lp1",
+            created=self.now,
+            created_by=None,
+        )
+        entity_in_lp2 = publishing_api.create_publishable_entity(
+            self.learning_package_2.id,
+            "dep_entity_in_lp2",
+            created=self.now,
+            created_by=None,
+        )
+        publishing_api.create_publishable_entity_version(
+            entity_in_lp2.id,
+            version_num=1,
+            title="Dependency in LP2",
+            created=self.now,
+            created_by=None,
+        )
+
+        # This should raise an error because entity_in_lp2 is from a
+        # different LearningPackage than entity_in_lp1.
+        with pytest.raises(ValidationError, match="Dependencies must be from the same learning package"):
+            publishing_api.create_publishable_entity_version(
+                entity_in_lp1.id,
+                version_num=1,
+                title="Entity in LP1 with cross-package dep",
+                created=self.now,
+                created_by=None,
+                dependencies=[entity_in_lp2.id],
+            )
+
+    def test_publish_functions_rejected_inside_bulk_draft_changes_for(self) -> None:
+        """
+        publish_all_drafts() and publish_from_drafts() must not be callable
+        from within a bulk_draft_changes_for() context.
+
+        bulk_draft_changes_for() opens a DraftChangeLog for accumulating draft
+        edits; running a publish inside it mixes draft-change bookkeeping with
+        publish bookkeeping in the same atomic block, which corrupts the
+        ordering of DraftChangeLog vs. PublishLog records and can leave Drafts
+        and Published rows out of sync if the outer context later raises.
+        """
+        entity = publishing_api.create_publishable_entity(
+            self.learning_package_1.id,
+            "entity_for_bulk_publish_check",
+            created=self.now,
+            created_by=None,
+        )
+        publishing_api.create_publishable_entity_version(
+            entity.id,
+            version_num=1,
+            title="Entity v1",
+            created=self.now,
+            created_by=None,
+        )
+
+        with pytest.raises(ValidationError, match="Cannot publish while in bulk_draft_changes_for()."):
+            with publishing_api.bulk_draft_changes_for(self.learning_package_1.id):
+                publishing_api.publish_all_drafts(self.learning_package_1.id)
+
+        with pytest.raises(ValidationError, match="Cannot publish while in bulk_draft_changes_for()."):
+            with publishing_api.bulk_draft_changes_for(self.learning_package_1.id):
+                publishing_api.publish_from_drafts(
+                    self.learning_package_1.id,
+                    Draft.objects.filter(entity__learning_package_id=self.learning_package_1.id),
+                )

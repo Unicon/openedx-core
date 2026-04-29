@@ -237,6 +237,14 @@ def create_publishable_entity_version(
             created_by_id=created_by,
         )
         if dependencies:
+            # Validate that dependencies are from the same learning package:
+            if (
+                PublishableEntity.objects.filter(id__in=dependencies)
+                .exclude(learning_package_id=version.entity.learning_package_id)
+                .exists()
+            ):
+                raise ValidationError("Dependencies must be from the same learning package")
+            # Store dependencies:
             set_version_dependencies(version.id, dependencies)
 
         set_draft_version(
@@ -466,6 +474,8 @@ def publish_from_drafts(
     By default, this will also publish all dependencies (e.g. unpinned children)
     of the Drafts that are passed in.
     """
+    if DraftChangeLogContext.get_active_draft_change_log(learning_package_id) is not None:
+        raise ValidationError("Cannot publish while in bulk_draft_changes_for().")
     if published_at is None:
         published_at = datetime.now(tz=timezone.utc)
 
@@ -509,6 +519,12 @@ def publish_from_drafts(
                 # Skip duplicates that we might get from expanding dependencies.
                 if draft.pk in published_draft_ids:
                     continue
+                # Validate Learning Package here where it won't require any extra queries
+                if draft.entity.learning_package_id != learning_package_id:
+                    raise ValidationError(
+                        f"Draft entity (id={draft.entity.id}) is from learning package "
+                        f"{draft.entity.learning_package_id}; expected learning package {learning_package_id}."
+                    )
 
                 try:
                     old_version = draft.entity.published.version
@@ -924,6 +940,17 @@ def set_draft_version(
         # The actual update of the Draft model is here. Everything after this
         # block is bookkeeping in our DraftChangeLog.
         draft.version_id = publishable_entity_version_pk
+
+        # Validate the entity
+        if publishable_entity_version_pk is not None:
+            if draft.entity.id != PublishableEntityVersion.objects.only("entity_id").get(
+                pk=publishable_entity_version_pk
+            ).entity_id:
+                invalid_pev = PublishableEntityVersion.objects.get(pk=publishable_entity_version_pk)
+                raise ValidationError(
+                    f"Entity mismatch - the specified PublishableEntityVersion ({repr(invalid_pev)}) does not match "
+                    f"the PublishableEntity ({repr(draft.entity)})."
+                )
 
         # Check to see if we're inside a context manager for an active
         # DraftChangeLog (i.e. what happens if the caller is using the public
