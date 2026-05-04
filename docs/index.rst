@@ -3,23 +3,21 @@
    You can adapt this file completely to your liking, but it should at least
    contain the root `toctree` directive.
 
-Open edX Core
-=============
+.. _openedx-core-index:
 
-The boring, foundational bits of a learning platform that are hard to get right at scale. Currently being developed for content storage.
-
-Contents:
+.. include:: ../README.rst
 
 .. toctree::
    :maxdepth: 2
 
-   readme
-   getting_started
-   testing
-   internationalization
-   changelog
-   api_reference
-   decisions
+   openedx_core/getting_started
+   openedx_core/testing
+   openedx_core/internationalization
+   openedx_core/decisions/index
+
+   openedx_content/index
+   openedx_tagging/index
+   openedx_learning/index
 
 Indices and tables
 ==================

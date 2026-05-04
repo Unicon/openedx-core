@@ -35,7 +35,7 @@ def get_version(*file_paths):
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(REPO_ROOT)
 
-VERSION = get_version('src/openedx_core', '__init__.py')
+VERSION = get_version('../src/openedx_core', '__init__.py')
 
 # Configure Django for autodoc usage
 os.environ['DJANGO_SETTINGS_MODULE'] = 'test_settings'
@@ -109,7 +109,7 @@ release = VERSION
 #
 # This is also used if you do content translation via gettext catalogs.
 # Usually you set "language" from the command line for these cases.
-language = None
+language = "en"
 
 # There are two options for replacing |today|: either, you set today to some
 # non-false value, then it is used:
