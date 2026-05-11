@@ -173,6 +173,7 @@ def test_get_course_run_nonexistent() -> None:
 
 def test_get_course_run(python100_summer26: CourseRun) -> None:
     """Basic retrieval of a CourseRun using the API"""
+    assert python100_summer26.course_key is not None
     run = api.get_course_run(python100_summer26.course_key)
     assert run == python100_summer26
 
@@ -370,6 +371,7 @@ def test_delete_course_run(
     python100_winter26: CourseRun,
 ) -> None:
     """Test that we can delete a CourseRun, passing in the object"""
+    assert python100_summer26.course_key is not None
     api.delete_course_run(python100_summer26.course_key)
     with pytest.raises(CourseRun.DoesNotExist):
         python100_summer26.refresh_from_db()  # Make sure it's gone
