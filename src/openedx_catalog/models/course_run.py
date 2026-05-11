@@ -153,6 +153,8 @@ class CourseRun(models.Model):
         """
         # This is not just called 'org' to distinguish it from loading the whole Organization model.
         # Note: 'self.catalog_course.org.short_name' may require a JOIN/query, but self.course_key.org does not.
+        assert self.course_key is not None
+        assert self.course_key.org is not None
         return self.course_key.org
 
     @property
@@ -160,6 +162,8 @@ class CourseRun(models.Model):
     def course_code(self) -> str:
         """Get the course code/number of this course, e.g. "Math100" """
         # Note: 'self.catalog_course.course_code' may require a JOIN/query, but self.course_key.course does not.
+        assert self.course_key is not None
+        assert self.course_key.course is not None
         return self.course_key.course
 
     # Do we want mix in SoftDeletableModel from django-model-utils to make courses soft deletable?
