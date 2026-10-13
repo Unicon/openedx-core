@@ -32,6 +32,7 @@ from .models import (
     MasteryStatus,
     StudentCompetencyCriterionStatus,
 )
+from .rollup import roll_up_competency_statuses
 from .rule_payloads import evaluate_rule
 
 __all__ = [
@@ -46,6 +47,7 @@ __all__ = [
     "record_graded_object_statuses",
     "resolve_competency_tag",
     "resolve_supplied_leaf_group",
+    "roll_up_competency_statuses",
     "select_competency_taxonomies",
 ]
 
