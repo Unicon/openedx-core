@@ -87,7 +87,7 @@ Decision
    5. ``name``: string
    6. ``ordering``: Indicates evaluation sequence number for this criteria group. This defines deterministic evaluation order for siblings during read-time evaluation and event-driven recomputation, and enables short-circuit evaluation.
    7. ``logic_operator``: Either “AND” or “OR” or null. This determines how children are combined at a group node ("AND" or "OR").
-   8. ``archived``: Boolean, defaults to false. Set instead of deleting a group once a student status exists for it. Archived groups are hidden from authoring and new associations but remain queryable, so existing ``CompetencyCriteria`` rows and learner status rows stay resolvable.
+   8. ``archived``: Boolean, defaults to false. Set instead of deleting a group once a student status exists for it. Archived groups are hidden from authoring and new associations but remain queryable, so existing ``CompetencyCriteria`` rows and learner status rows stay resolvable. Archived groups no longer count toward learner statuses (Decision 6).
 
    Example: A root group uses "OR" with two child groups.
 
@@ -165,7 +165,7 @@ Decision
 
       1. ``Grade``: ``{"op": "gte", "value": 0.75, "scale": "percent"}``. Allowed ``op`` values: ``gte``, ``lte``, ``eq``. ``value`` must be a fraction between 0.0 and 1.0 inclusive, matching the platform's existing fractional grade representation, not a 0-100 scale.
 
-   7. ``archived``: Boolean, defaults to false. Set instead of deleting a criterion once a student status exists for it. Archived criteria are hidden from authoring and new associations but remain queryable, so existing learner status rows stay resolvable.
+   7. ``archived``: Boolean, defaults to false. Set instead of deleting a criterion once a student status exists for it. Archived criteria are hidden from authoring and new associations but remain queryable, so existing learner status rows stay resolvable. Archived criteria no longer count toward learner statuses (Decision 6).
 
    Exactly one of the following holds for a given criterion, never both, never neither:
 
@@ -266,6 +266,7 @@ Decision
    - Recompute ancestor ``CompetencyCriteriaGroup`` statuses upward to the root.
    - At each group, evaluate children in ``ordering`` sequence and short-circuit when the group's result is already determined by its ``logic_operator``.
    - Persist only rows whose status changed.
+   - An archived criterion is not evaluated when a grade is recorded, and a group is recomputed from its non-archived children only. A stored status is never lowered, including one a live group or competency earned through a child that is now archived, and rows of archived criteria and groups are left unchanged. Archiving recomputes nothing itself: a learner's statuses reflect it the next time the rollup runs for that group's content, or when an operator recomputes them.
 
    1. Add new database table for ``CompetencyMasteryStatuses`` with these columns:
 
@@ -458,3 +459,13 @@ Changelog
 * ``scope_code`` on ``CompetencyRuleProfile`` is now computed by
   application code instead of being database-generated, and is set to null while a
   profile is archived, freeing its scope for a replacement.
+
+2026-10-27:
+
+* Amended Decision 6 for issue #815: archived criteria and criteria groups are excluded when a
+  learner's group and competency statuses are combined, so a requirement or branch that has been
+  archived no longer has to be met. A status already recorded against an archived criterion or
+  group is never lowered or removed, so mastery a learner has already earned stays earned. A
+  sub-competency whose root group is archived produces the same investigation warning as one
+  that was never given requirements. The amendment also records that archived criteria are
+  already skipped when a grade is recorded.
