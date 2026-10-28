@@ -69,13 +69,17 @@ def combine_parent_competency_status(
 
 
 def _child_groups(group_ids: set[int]) -> list[tuple[int, int]]:
-    """Return (child group id, parent group id) for every child group of ``group_ids``."""
-    return list(CompetencyCriteriaGroup.objects.filter(parent_id__in=group_ids).values_list("pk", "parent_id"))
+    """Return (child group id, parent group id) for every live child group of ``group_ids``."""
+    return list(
+        CompetencyCriteriaGroup.objects.filter(parent_id__in=group_ids, archived=False).values_list("pk", "parent_id")
+    )
 
 
 def _child_criteria(group_ids: set[int]) -> list[tuple[int, int]]:
-    """Return (criterion id, group id) for every criterion directly under ``group_ids``."""
-    return list(CompetencyCriterion.objects.filter(group_id__in=group_ids).values_list("pk", "group_id"))
+    """Return (criterion id, group id) for every live criterion directly under ``group_ids``."""
+    return list(
+        CompetencyCriterion.objects.filter(group_id__in=group_ids, archived=False).values_list("pk", "group_id")
+    )
 
 
 def _to_status(value: int | None) -> MasteryStatus | None:
@@ -83,7 +87,7 @@ def _to_status(value: int | None) -> MasteryStatus | None:
 
 
 def _children_statuses(user_id: int, group_ids: set[int]) -> dict[int, list[MasteryStatus | None]]:
-    """Return, per group, one status (or None for no row) for each of its child groups and criteria."""
+    """Return, per group, one status (or None for no row) for each of its live child groups and criteria."""
     child_groups = _child_groups(group_ids)
     child_criteria = _child_criteria(group_ids)
     group_status = dict(
@@ -115,7 +119,8 @@ def _roll_up_groups(user_id: int, group_ids: set[int], now: datetime) -> set[int
     """
     Recompute each group in ``group_ids`` and then its parent, one level at a time, up to the roots.
 
-    Returns the ids of the competency tags whose root group was reached.
+    An archived group is walked through without writing its status or, for a root, its competency's status. Returns
+    the ids of the competency tags whose root group was reached.
     """
     competency_tag_ids: set[int] = set()
     frontier = set(group_ids)
@@ -123,7 +128,7 @@ def _roll_up_groups(user_id: int, group_ids: set[int], now: datetime) -> set[int
         statuses = _children_statuses(user_id, frontier)
         next_frontier: set[int] = set()
         for group in CompetencyCriteriaGroup.objects.filter(pk__in=frontier):
-            status = combine_children(group.logic_operator, statuses[group.pk])
+            status = None if group.archived else combine_children(group.logic_operator, statuses[group.pk])
             if status is not None:
                 raise_status(
                     StudentCompetencyCriteriaGroupStatus.objects,
@@ -148,6 +153,7 @@ def _roll_up_groups(user_id: int, group_ids: set[int], now: datetime) -> set[int
 
 def _own_criteria_statuses(user_id: int, tag_ids: set[int]) -> dict[int, MasteryStatus]:
     """Return each tag's own criteria result: its best root-group status, for tags that have an attempted root."""
+    # Archived roots stay counted: a stored root status already raised its competency's row.
     rows = (
         StudentCompetencyCriteriaGroupStatus.objects.filter(
             user_id=user_id, group__tag_id__in=tag_ids, group__parent__isnull=True,
@@ -170,7 +176,7 @@ def _sub_competency_status(child_ids: list[int], competency_status: dict[int, in
 
 
 def _log_unearnable_sub_competencies(parents: list[Tag], children_by_parent: dict[int, list[tuple[int, str]]]) -> None:
-    """Log each direct sub-competency with no root criteria group anywhere in its subtree."""
+    """Log each direct sub-competency with no live root criteria group anywhere in its subtree."""
     candidates = [
         (parent, child_id, lineage)
         for parent in parents
@@ -179,7 +185,7 @@ def _log_unearnable_sub_competencies(parents: list[Tag], children_by_parent: dic
     if not candidates:
         return
     root_lineages: dict[int | None, list[str]] = {}
-    rows = CompetencyCriteriaGroup.objects.filter(parent__isnull=True).filter(
+    rows = CompetencyCriteriaGroup.objects.filter(parent__isnull=True, archived=False).filter(
         reduce(or_, (
             Q(tag__taxonomy_id=parent.taxonomy_id, tag__lineage__startswith=lineage)
             for parent, _, lineage in candidates
@@ -239,11 +245,16 @@ def roll_up_competency_statuses(*, user_id: int, object_ids: Sequence[str]) -> N
     """
     Recompute the learner's statuses above the criteria attached to ``object_ids``, up to the top of the framework.
 
+    UNSTABLE: the staff-correction and operator-recomputation entry points still to come may change this function's
+    shape or results without a deprecation cycle.
+
     The caller must not be inside a transaction, because each level has to commit before the next is read.
     Repeated calls with the same arguments are safe, since every write only ever raises a stored status.
+    Archived groups and criteria are left out of the combination, and a status already stored against them is kept.
     """
     if not object_ids:
         return
+    # Unfiltered: a call naming an archived criterion's object still recomputes its group from live children.
     group_ids = set(
         CompetencyCriterion.objects.filter(
             object_tag__object_id__in=list(set(object_ids)),
