@@ -1,8 +1,9 @@
 """Shared fixtures for the CBE test modules: schema, deletion, tree-integration, status, and REST tests."""
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from datetime import datetime, timezone
 
 import pytest
+import rules
 from django.contrib.auth import get_user_model
 from organizations.api import ensure_organization
 from organizations.models import Organization
@@ -39,6 +40,19 @@ def _course_run(organization: Organization) -> CourseRun:
     """A CourseRun for use as a scope in these tests."""
     catalog_course = CatalogCourse.objects.create(org=organization, course_code="Python100")
     return CourseRun.objects.create(catalog_course=catalog_course, run_code="Fall2026")
+
+
+@pytest.fixture(name="course_x")
+def _course_x(course_run: CourseRun) -> CourseRun:
+    """Course run X, the course run the competency criteria endpoint is asked about."""
+    return course_run
+
+
+@pytest.fixture(name="course_y")
+def _course_y(organization: Organization) -> CourseRun:
+    """Course run Y, a second course run that shares competencies with course run X."""
+    catalog_course = CatalogCourse.objects.create(org=organization, course_code="Python200")
+    return CourseRun.objects.create(catalog_course=catalog_course, run_code="Spring2027")
 
 
 @pytest.fixture(name="competency_taxonomy")
@@ -159,3 +173,18 @@ def _run_when_tag_lock_is_taken(monkeypatch: pytest.MonkeyPatch) -> Callable[[Ca
         monkeypatch.setattr(Tag.objects, "select_for_update", _select_for_update)
 
     return _install
+
+
+@pytest.fixture(name="restore_permission_registry")
+def _restore_permission_registry() -> Iterator[None]:
+    """
+    Put the ``rules`` permission registry back as it was before the test, whatever the test rebinds.
+
+    A test that plays the host application, by rebinding or removing a permission or reloading a rules
+    module, uses this so the core defaults are back in force for every test after it.
+    """
+    registry = rules.permissions.permissions
+    snapshot = dict(registry)
+    yield
+    registry.clear()
+    registry.update(snapshot)
