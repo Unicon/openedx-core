@@ -18,7 +18,7 @@ __all__ = [
 ]
 
 # Checked with the course key, as ``user.has_perm(VIEW_COURSE_COMPETENCY_CRITERIA, course_key)``.
-# openedx-platform binds its own rule to this name, so the name is part of this library's contract.
+# openedx-platform is expected to bind its own rule to this name, so the name is part of this library's contract.
 VIEW_COURSE_COMPETENCY_CRITERIA = "openedx_learning.view_course_competency_criteria"
 
 

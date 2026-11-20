@@ -1,3 +1,4 @@
+
 """
 Tests for get_course_competency_criteria(), the read behind the learner endpoint that lists a course
 run's competency criteria.
@@ -8,6 +9,9 @@ the bottom-tier groups, which hold the criteria.
 
 Fixtures live in this directory's conftest.py, the tree builders in utils.py.
 """
+import signal
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import datetime
 from typing import NamedTuple
 
@@ -415,6 +419,40 @@ def test_an_ancestor_value_in_another_taxonomy_does_not_leak_into_a_lineage(
         "Root Cause Analysis": [nursing_problem_solving.id, nursing_root_cause_analysis.id],
         "Estimation": [durable_problem_solving.id, durable_estimation.id],
     }
+
+
+@contextmanager
+def fails_after(seconds: float) -> Iterator[None]:
+    """Raise TimeoutError if the block runs longer than `seconds`, so a loop that never ends fails the test."""
+    def _time_out(_signum, _frame):
+        raise TimeoutError(f"still running after {seconds} seconds")
+
+    previous_handler = signal.signal(signal.SIGALRM, _time_out)
+    signal.setitimer(signal.ITIMER_REAL, seconds)
+    try:
+        yield
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, previous_handler)
+
+
+def test_a_parent_cycle_among_tags_does_not_hang_the_read(
+    course_x: CourseRun, competency_taxonomy: CompetencyTaxonomy, default_rule_profile: CompetencyRuleProfile,
+) -> None:
+    """A tag moved under its own descendant with a plain save() forms a parent cycle; the read still answers."""
+    problem_solving = make_tag(competency_taxonomy, "Problem Solving")
+    problem_definition = make_tag(competency_taxonomy, "Problem Definition", problem_solving)
+    root_cause_analysis = make_tag(competency_taxonomy, "Root Cause Analysis", problem_definition)
+    make_branch(root_cause_analysis, course_x, default_rule_profile, "rca_quiz")
+    problem_solving.parent = root_cause_analysis
+    problem_solving.save()
+
+    with fails_after(seconds=5):
+        result = get_course_competency_criteria(course_key_of(course_x))
+
+    assert [entry.value for entry in result.tags[0].lineage] == [
+        "Problem Solving", "Problem Definition", "Root Cause Analysis",
+    ]
 
 
 def test_renaming_an_ancestor_tag_while_the_read_runs_does_not_break_it(

@@ -73,7 +73,11 @@ class GroupDeletionResult:
 
 @dataclass(frozen=True, kw_only=True, slots=True)
 class TagLineageEntry:
-    """One tag on the path from the top of a taxonomy down to a competency."""
+    """
+    One tag on the path from the top of a taxonomy down to a competency.
+
+    UNSTABLE: this shape may change without a deprecation cycle.
+    """
 
     id: int
     value: str
@@ -81,7 +85,11 @@ class TagLineageEntry:
 
 @dataclass(frozen=True, kw_only=True, slots=True)
 class CompetencyTaxonomyData:
-    """A competency taxonomy that holds at least one competency with criteria in the course run."""
+    """
+    A competency taxonomy that holds at least one competency with criteria in the course run.
+
+    UNSTABLE: this shape may change without a deprecation cycle.
+    """
 
     id: int
     name: str
@@ -93,6 +101,8 @@ class CompetencyTagData:
     A competency: a tag of a competency taxonomy.
 
     ``lineage`` runs from the top of the taxonomy down to the competency itself, which is its last entry.
+
+    UNSTABLE: this shape may change without a deprecation cycle.
     """
 
     id: int
@@ -107,7 +117,11 @@ class CriteriaGroupData:
     """
     A criteria group. A root group has no ``parent_id``; every group names its competency through ``tag_id``.
 
-    ``logic_operator`` is ``"AND"``, ``"OR"`` or ``None``, which is for a single-child group only and reads as ``OR``.
+    ``logic_operator`` is ``"AND"``, ``"OR"`` or ``None``. ``None`` means no operator was stored: the root and
+    course-level groups the authoring API creates carry ``None`` however many children they have, and a
+    reader treats ``None`` as ``OR``.
+
+    UNSTABLE: this shape may change without a deprecation cycle.
     """
 
     id: int
@@ -124,7 +138,10 @@ class CriterionData:
     A criterion: the rule a learner must meet on one object, such as a graded subsection, to count towards a group.
 
     ``rule_type`` and ``rule_payload`` are the effective rule, whether it comes from the criterion's rule
-    profile or from its own override, with the payload exactly as stored.
+    profile or from its own override, with the payload exactly as stored. A Grade payload's ``value`` is a
+    fraction from 0.0 to 1.0 (see ``GradeRulePayload``), even though its ``scale`` reads ``"percent"``.
+
+    UNSTABLE: this shape may change without a deprecation cycle.
     """
 
     id: int

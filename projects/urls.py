@@ -9,7 +9,7 @@ urlpatterns = [
     path("admin/", admin.site.urls),
     path("tagging/rest_api/", include("openedx_tagging.urls")),
     # Mirrors the prefix openedx-platform mounts CBE at; a consuming project picks its own.
-    # openedx-platform's CMS mounts only the authoring URLs; the learner URLs are for its LMS.
+    # openedx-platform's CMS mounts only the authoring URLs; the learner URLs are meant for its LMS.
     path("api/", include("openedx_learning.urls")),
     path("api/", include("openedx_learning.learner_urls")),
     path('__debug__/', include('debug_toolbar.urls')),

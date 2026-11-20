@@ -175,7 +175,6 @@ def _ids_of_groups_with_criteria_beneath(
 
 
 def _only_kept(groups: Iterable[CompetencyCriteriaGroup], kept_group_ids: set[int]) -> list[CompetencyCriteriaGroup]:
-    """Return the groups whose id is in ``kept_group_ids``, in their order."""
     return [group for group in groups if group.id in kept_group_ids]
 
 
@@ -190,17 +189,24 @@ def _tags_of(course_level_groups: list[CompetencyCriteriaGroup]) -> list[Tag]:
 
 def _find_ancestor_tags_by_id(tags: list[Tag]) -> dict[int, Tag]:
     """
-    Find the ancestors of ``tags`` in one query, as a map from id to tag.
+    Find the ancestors of ``tags``, one query per level of depth, as a map from id to tag.
 
-    The query matches by taxonomy and ancestor value, so it can return unrelated tags that share a value
-    with an ancestor; walking ``parent_id`` through the map ignores those. Archived ancestors are included,
-    because archiving a tag does not archive its descendants and a lineage without them would have a gap.
+    Ancestors are looked up by id, so a tag renamed while the read runs cannot break the lookup.
+    Archived ancestors are included defensively, so a lineage never has a gap should a live tag sit
+    under an archived one.
     """
-    ancestor_values = {value for tag in tags for value in tag.get_lineage()[:-1]}
-    if not ancestor_values:
-        return {}
-    taxonomy_ids = {_taxonomy_of(tag).id for tag in tags}
-    return Tag.objects.filter(taxonomy_id__in=taxonomy_ids, value__in=ancestor_values).in_bulk()
+    ancestor_tags_by_id: dict[int, Tag] = {}
+    parent_ids = _parent_ids_of(tags)
+    while parent_ids:
+        parents = Tag.objects.in_bulk(parent_ids)
+        ancestor_tags_by_id.update(parents)
+        # Skipping ids already fetched keeps a corrupt parent cycle from looping forever.
+        parent_ids = _parent_ids_of(parents.values()) - ancestor_tags_by_id.keys()
+    return ancestor_tags_by_id
+
+
+def _parent_ids_of(tags: Iterable[Tag]) -> set[int]:
+    return {tag.parent_id for tag in tags if tag.parent_id is not None}
 
 
 def _taxonomy_of(tag: Tag) -> Taxonomy:
@@ -213,7 +219,10 @@ def _lineage_of(tag: Tag, ancestor_tags_by_id: dict[int, Tag]) -> tuple[TagLinea
     """Return the path from the top of ``tag``'s taxonomy down to ``tag``."""
     path_up = [tag]
     while path_up[-1].parent_id is not None:
-        path_up.append(ancestor_tags_by_id[path_up[-1].parent_id])
+        parent = ancestor_tags_by_id[path_up[-1].parent_id]
+        if parent in path_up:  # A corrupt parent cycle: stop rather than loop forever.
+            break
+        path_up.append(parent)
     return tuple(TagLineageEntry(id=step.id, value=step.value) for step in reversed(path_up))
 
 
@@ -265,5 +274,4 @@ def _criterion_data(criterion: CompetencyCriterion) -> CriterionData:
 
 
 def _ordering_then_id(group: CompetencyCriteriaGroup) -> tuple[int, int]:
-    """Sort key for sibling groups: their stored ordering, ties broken by id."""
     return group.ordering, group.id
