@@ -26,7 +26,17 @@ from openedx_tagging.models import ObjectTag, Tag, Taxonomy
 from openedx_tagging.rules import ObjectTagPermissionItem, UserType
 
 from .course_criteria import get_course_competency_criteria
-from .data import CriterionDeletionResult, GradedObjectScore, GroupDeletionResult
+from .data import (
+    CompetencyTagData,
+    CompetencyTaxonomyData,
+    CourseCompetencyCriteria,
+    CriteriaGroupData,
+    CriterionData,
+    CriterionDeletionResult,
+    GradedObjectScore,
+    GroupDeletionResult,
+    TagLineageEntry,
+)
 from .models import (
     CompetencyCourseRun,
     CompetencyCriteriaGroup,
@@ -47,9 +57,15 @@ __all__ = [
     "CompetencyCriteriaGroupArchivedError",
     "CompetencyCriteriaTree",
     "CompetencyCriterionArchivedError",
+    "CompetencyTagData",
+    "CompetencyTaxonomyData",
+    "CourseCompetencyCriteria",
+    "CriteriaGroupData",
+    "CriterionData",
     "CriterionDeletionResult",
     "GradedObjectScore",
     "GroupDeletionResult",
+    "TagLineageEntry",
     "associate_competency_criterion",
     "bulk_update_competency_criteria",
     "create_competency_criterion",

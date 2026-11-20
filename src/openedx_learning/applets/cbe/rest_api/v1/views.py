@@ -3,6 +3,8 @@ Views for the CBE REST API, v1.
 """
 from __future__ import annotations
 
+import dataclasses
+
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import IntegrityError
 from django.db.models import QuerySet
@@ -50,7 +52,6 @@ from .serializers import (
     CompetencyCriterionReadSerializer,
     CompetencyCriterionSerializer,
     CompetencyRuleProfileSerializer,
-    CourseCompetencyCriteriaSerializer,
     parse_course_run_key,
 )
 
@@ -407,8 +408,8 @@ class CourseCompetencyCriteriaView(APIView):
     ``GET api/cbe/v1/courses/<course_key>/competency-criteria/`` answers in this order: 401 for a caller
     who is not signed in, 400 for a ``course_key`` that is not the plain key of a course run, 403 when the
     ``openedx_learning.view_course_competency_criteria`` permission refuses that key, else 200. A
-    well-formed key the catalog does not know gives 200 with empty lists, never 404. Nothing is read from
-    the database before the permission check.
+    well-formed key the catalog does not know gives 200 with empty lists, never 404. This view reads nothing
+    before the permission check, though authentication and the host's rule may query.
 
     The default permission admits any signed-in user. A host that needs more, such as enrollment, rebinds
     the permission with ``rules.set_perm``.
@@ -423,6 +424,7 @@ class CourseCompetencyCriteriaView(APIView):
     def get(self, request, course_key: str) -> Response:
         """Return the course run's criteria, if the caller may read them."""
         parsed_key = parse_course_run_key(course_key)
+        # Not a permission class: the key must be parsed first, so a malformed key gets 400 before 403.
         if not request.user.has_perm(VIEW_COURSE_COMPETENCY_CRITERIA, parsed_key):
             raise PermissionDenied
-        return Response(CourseCompetencyCriteriaSerializer(get_course_competency_criteria(parsed_key)).data)
+        return Response(dataclasses.asdict(get_course_competency_criteria(parsed_key)))

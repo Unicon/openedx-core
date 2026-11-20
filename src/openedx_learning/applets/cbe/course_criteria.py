@@ -4,6 +4,9 @@ The read behind the learner-facing list of a course run's competency criteria.
 The selection runs in steps, each a function below: find the course-level groups, walk down to every
 group beneath them, find the criteria on those groups, prune the groups that hold no criterion, and
 add each competency's lineage. Assembly into value objects comes last, so no step mixes the two.
+
+A competency has one root group shared by every course run. A course run's part of it, its "course
+branch", is its course-level group and every group beneath that.
 """
 from __future__ import annotations
 
@@ -41,29 +44,22 @@ def get_course_competency_criteria(course_key: CourseKey) -> CourseCompetencyCri
     UNSTABLE: the criteria family is incomplete, so this function and its result may change without a
     deprecation cycle.
 
-    This performs no authorization. The caller must first check that its user may read this course run's
-    criteria, which is what ``VIEW_COURSE_COMPETENCY_CRITERIA`` in ``openedx_learning.rules`` is for.
+    This performs no authorization. The caller must first check that its user may read the course run,
+    which is what ``VIEW_COURSE_COMPETENCY_CRITERIA`` in ``openedx_learning.rules`` is for.
 
-    Only criteria that count today are returned. Left out, together with everything beneath them:
-    archived groups, archived criteria and criteria whose object tag is archived, competencies whose tag or
-    taxonomy is archived, and competencies of a disabled taxonomy or of a taxonomy that is not a competency
-    taxonomy. A group, competency or taxonomy with no returned criterion beneath it is left out too. A
-    course run with nothing to return, or one the catalog does not know, gives an empty result rather than
-    an error.
+    Left out, with everything beneath them: archived groups and criteria, criteria whose object tag is
+    archived, competencies whose tag or taxonomy is archived, and competencies of a disabled taxonomy or a
+    non-competency taxonomy. A group, competency or taxonomy with no returned criterion beneath it is left
+    out too. A course run with nothing to return, or one the catalog does not know, gives an empty result.
 
-    The course run is matched by its plain key, so a key that carries a branch or a version matches nothing.
-    The database column would otherwise ignore the branch and the version when comparing, which is why this
-    function checks for them itself.
+    A key that carries a branch or a version matches nothing.
 
-    Order: ``taxonomies``, ``tags`` and ``criteria`` by id. ``groups`` level by level, roots first, then
-    the course-level groups, then each deeper level, and by ``(ordering, id)`` within a level, so every
-    group follows its parent. Each tag's ``lineage`` runs from the top of its taxonomy down to the tag.
+    ``taxonomies``, ``tags`` and ``criteria`` are ordered by id. ``groups`` come level by level, roots
+    first, then the course-level groups, then each deeper level, by ``(ordering, id)`` within a level, so
+    every group follows its parent. A tag's ``lineage`` runs from the top of its taxonomy down to the tag.
 
-    A course-level group is found only when it sits directly under a root group. That is the one shape
-    the authoring API creates, and it guarantees that the parent of every returned group is itself returned,
-    which is what lets a client rebuild the nesting from the result alone. A group between a root and a
-    course-level group would be named as a parent without being listed, so such a course-level group is
-    not found.
+    A course-level group is found only directly under a root, the one shape the authoring API creates.
+    That keeps every returned group's parent in the result, so a client can rebuild the nesting from it.
     """
     if _carries_branch_or_version(course_key):
         return _EMPTY_RESULT
@@ -91,6 +87,7 @@ def get_course_competency_criteria(course_key: CourseKey) -> CourseCompetencyCri
 
 
 def _carries_branch_or_version(course_key: CourseKey) -> bool:
+    """Say whether ``course_key`` is more than a plain run key, which the ``course_key`` column would ignore."""
     return isinstance(course_key, CourseLocator) and (
         course_key.branch is not None or course_key.version_guid is not None
     )
@@ -133,16 +130,17 @@ def _find_levels_below(course_level_groups: list[CompetencyCriteriaGroup]) -> li
     A group is reached only through live parents, so an archived group takes its whole subtree with it.
     """
     levels: list[list[CompetencyCriteriaGroup]] = []
-    parent_level = course_level_groups
+    parents = course_level_groups
     while True:
-        parent_level = list(
+        children = list(
             CompetencyCriteriaGroup.objects.filter(
-                parent_id__in=[group.id for group in parent_level], archived=False,
+                parent_id__in=[group.id for group in parents], archived=False,
             ).order_by("ordering", "id")
         )
-        if not parent_level:
+        if not children:
             return levels
-        levels.append(parent_level)
+        levels.append(children)
+        parents = children
 
 
 def _find_criteria(course_branch_levels: list[list[CompetencyCriteriaGroup]]) -> list[CompetencyCriterion]:

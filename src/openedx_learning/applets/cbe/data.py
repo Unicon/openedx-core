@@ -98,7 +98,7 @@ class CompetencyTagData:
     id: int
     taxonomy_id: int
     value: str
-    external_id: str | None
+    external_id: str
     lineage: tuple[TagLineageEntry, ...]
 
 
@@ -139,9 +139,14 @@ class CourseCompetencyCriteria:
     """
     Everything the learner-facing criteria read returns for one course run.
 
-    Each collection is a tuple. Every id a group, tag or criterion refers to belongs to an entry of the
-    matching collection here, so the taxonomy, competency, group and criterion nesting can be rebuilt from
-    this object alone.
+    Each collection is a tuple. Every reference field is named after the collection it points into
+    (``taxonomy_id`` into ``taxonomies``, ``tag_id`` into ``tags``, ``parent_id`` and ``group_id`` into
+    ``groups``), and every id it holds belongs to an entry there, so the taxonomy, competency, group and
+    criterion nesting can be rebuilt from this object alone. Authoring-side columns, such as the rule
+    profile id, the override columns and the object tag id, are left out on purpose.
+
+    The learner endpoint returns this object as its JSON body, so this class and the classes it holds are
+    the description of the wire format.
 
     UNSTABLE: this shape may change without a deprecation cycle.
     """
