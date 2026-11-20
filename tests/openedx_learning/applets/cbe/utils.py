@@ -88,30 +88,33 @@ def make_branch(tag: Tag, course_run: CourseRun, rule_profile: CompetencyRulePro
     assert course_level is not None
     root = course_level.parent
     assert root is not None
-    criteria = [add_criterion(bottom_tier, course_run, rule_profile, block_id) for block_id in block_ids]
+    criteria = [add_criterion(bottom_tier, course_run, block_id, rule_profile=rule_profile) for block_id in block_ids]
     return Branch(root=root, course_level=course_level, bottom_tier=bottom_tier, criteria=criteria)
 
 
 def add_criterion(
-    group: CompetencyCriteriaGroup, course_run: CourseRun, rule_profile: CompetencyRuleProfile, block_id: str,
+    group: CompetencyCriteriaGroup,
+    course_run: CourseRun,
+    block_id: str,
+    *,
+    rule_profile: CompetencyRuleProfile | None = None,
+    rule_payload_override: dict | None = None,
 ) -> CompetencyCriterion:
-    """Create a criterion in `group` on the subsection `block_id` of `course_run`, using `rule_profile`'s rule."""
+    """
+    Create a criterion in `group` on the subsection `block_id` of `course_run`.
+
+    Give exactly one of `rule_profile`, whose rule the criterion then uses, or `rule_payload_override`, a Grade
+    rule payload the criterion carries itself.
+    """
+    assert (rule_profile is None) != (rule_payload_override is None)
     object_tag = ObjectTag.objects.create(
         object_id=usage_key(course_run, block_id), taxonomy=group.tag.taxonomy, tag=group.tag,
     )
-    return CompetencyCriterion.objects.create(group=group, object_tag=object_tag, rule_profile=rule_profile)
-
-
-def add_criterion_with_override(
-    group: CompetencyCriteriaGroup, course_run: CourseRun, block_id: str, rule_payload: dict,
-) -> CompetencyCriterion:
-    """Create a criterion in `group` on the subsection `block_id` with its own Grade rule and no rule profile."""
-    object_tag = ObjectTag.objects.create(
-        object_id=usage_key(course_run, block_id), taxonomy=group.tag.taxonomy, tag=group.tag,
-    )
+    if rule_profile is not None:
+        return CompetencyCriterion.objects.create(group=group, object_tag=object_tag, rule_profile=rule_profile)
     return CompetencyCriterion.objects.create(
         group=group,
         object_tag=object_tag,
         rule_type_override=RuleType.GRADE,
-        rule_payload_override=rule_payload,
+        rule_payload_override=rule_payload_override,
     )

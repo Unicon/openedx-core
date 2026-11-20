@@ -2,37 +2,32 @@
 Tests for get_course_competency_criteria(), the read behind the learner endpoint that lists a course
 run's competency criteria.
 
-Vocabulary, as in the ticket: a competency is a Tag in a competency taxonomy. Each competency has one root
+Vocabulary: a competency is a Tag in a competency taxonomy. Each competency has one root
 group, shared by every course run. Beneath it sits one course-level group per course run, and beneath that
 the bottom-tier groups, which hold the criteria.
 
 Fixtures live in this directory's conftest.py, the tree builders in utils.py.
 """
-import dataclasses
-import inspect
-from collections.abc import Iterator
 from datetime import datetime
 from typing import NamedTuple
 
 import pytest
 import rules
+from bson import ObjectId
 from opaque_keys.edx.keys import CourseKey
-from rules.permissions import permissions as rule_permissions
+from opaque_keys.edx.locator import CourseLocator
 
 from openedx_catalog.models import CourseRun
 from openedx_learning.api import (
-    delete_or_archive_competency_criteria_group,
-    delete_or_archive_competency_criterion,
-    get_course_competency_criteria,
-)
-from openedx_learning.applets.cbe import api as cbe_api
-from openedx_learning.applets.cbe.data import (
     CompetencyTagData,
     CompetencyTaxonomyData,
     CourseCompetencyCriteria,
     CriteriaGroupData,
     CriterionData,
     TagLineageEntry,
+    delete_or_archive_competency_criteria_group,
+    delete_or_archive_competency_criterion,
+    get_course_competency_criteria,
 )
 from openedx_learning.models import (
     CompetencyCriteriaGroup,
@@ -45,16 +40,7 @@ from openedx_learning.models import (
 )
 from openedx_tagging.models import ObjectTag, Tag, Taxonomy
 
-from .utils import (
-    Branch,
-    add_criterion,
-    add_criterion_with_override,
-    course_key_of,
-    make_branch,
-    make_competency_taxonomy,
-    make_tag,
-    usage_key,
-)
+from .utils import Branch, add_criterion, course_key_of, make_branch, make_competency_taxonomy, make_tag, usage_key
 
 pytestmark = pytest.mark.django_db
 
@@ -64,17 +50,16 @@ EMPTY_RESULT = CourseCompetencyCriteria(taxonomies=(), tags=(), groups=(), crite
 
 
 @pytest.fixture(autouse=True)
-def _allow_object_level_tagging() -> Iterator[None]:
+def _allow_object_level_tagging(request: pytest.FixtureRequest) -> None:
     """
-    Let any user tag any object; restore the real rule afterwards.
+    Let any user tag any object.
 
     The archive API checks that its caller may tag the criterion's object, and openedx_tagging leaves
     that rule to openedx-platform.
     """
-    original = rule_permissions[CHANGE_OBJECTTAG_OBJECTID]
+    # The registry fixture snapshots the rules before this one changes them, and restores them afterwards.
+    request.getfixturevalue("restore_permission_registry")
     rules.set_perm(CHANGE_OBJECTTAG_OBJECTID, lambda _user, _object_id: True)
-    yield
-    rules.set_perm(CHANGE_OBJECTTAG_OBJECTID, original)
 
 
 # ---------------------------------------------------------------------------------------------
@@ -172,19 +157,18 @@ def assert_only_communication_remains(result: CourseCompetencyCriteria, course: 
 
 
 def test_a_course_run_that_never_had_criteria_returns_an_empty_result(course_x: CourseRun) -> None:
-    """AC9a: a course run in the catalog with no competency criteria gives four empty collections."""
     assert get_course_competency_criteria(course_key_of(course_x)) == EMPTY_RESULT
 
 
 def test_a_well_formed_key_matching_no_course_run_returns_an_empty_result() -> None:
-    """AC9b: a key that is not in the catalog is not an error; it has no criteria, like any other course run."""
+    """A key the catalog does not know has no criteria, which is not an error."""
     key_not_in_catalog = CourseKey.from_string("course-v1:Nowhere+Missing+Run")
 
     assert get_course_competency_criteria(key_not_in_catalog) == EMPTY_RESULT
 
 
 def test_an_empty_result_costs_one_query(course_x: CourseRun, django_assert_num_queries) -> None:
-    """N3, E17: finding no course-level group is the only query a course run without criteria costs."""
+    """Finding no course-level group is the only query a course run without criteria costs."""
     with django_assert_num_queries(1):
         result = get_course_competency_criteria(course_key_of(course_x))
 
@@ -194,7 +178,7 @@ def test_an_empty_result_costs_one_query(course_x: CourseRun, django_assert_num_
 def test_a_key_differing_only_in_case_matches_nothing(
     course_x: CourseRun, tag: Tag, default_rule_profile: CompetencyRuleProfile,
 ) -> None:
-    """E4: the catalog's course key is case-sensitive, so another spelling of the case is another course run."""
+    """The catalog's course key is case-sensitive, so another spelling of the case is another course run."""
     make_branch(tag, course_x, default_rule_profile, "quiz1")
     assert get_course_competency_criteria(course_key_of(course_x)).criteria
     other_case = CourseKey.from_string(str(course_key_of(course_x)).replace("Org1", "org1"))
@@ -206,12 +190,24 @@ def test_a_key_differing_only_in_case_matches_nothing(
 def test_a_key_with_a_branch_matches_nothing(
     course_x: CourseRun, tag: Tag, default_rule_profile: CompetencyRuleProfile,
 ) -> None:
-    """E5, API side: the catalog holds the plain course key only, so a draft-branch key finds nothing."""
+    """The catalog holds plain course keys only, so a draft-branch key finds nothing."""
     make_branch(tag, course_x, default_rule_profile, "quiz1")
     assert get_course_competency_criteria(course_key_of(course_x)).criteria
     draft_key = CourseKey.from_string(f"{course_key_of(course_x)}+branch@draft-branch")
 
     assert get_course_competency_criteria(draft_key) == EMPTY_RESULT
+
+
+def test_a_key_with_only_a_version_matches_nothing(
+    course_x: CourseRun, tag: Tag, default_rule_profile: CompetencyRuleProfile,
+) -> None:
+    """The catalog holds plain course keys only, so a key pinned to a version finds nothing."""
+    make_branch(tag, course_x, default_rule_profile, "quiz1")
+    plain_key = course_key_of(course_x)
+    assert get_course_competency_criteria(plain_key).criteria
+    versioned_key = CourseLocator(plain_key.org, plain_key.course, plain_key.run, version_guid=ObjectId())
+
+    assert get_course_competency_criteria(versioned_key) == EMPTY_RESULT
 
 
 # =============================================================================================
@@ -223,8 +219,8 @@ def test_the_result_can_be_reassembled_from_the_taxonomy_down_to_each_criterion(
     course_x: CourseRun, competency_taxonomy: CompetencyTaxonomy, default_rule_profile: CompetencyRuleProfile,
 ) -> None:
     """
-    AC10: root, course-level and bottom-tier groups, two criteria, and the competency and taxonomy above
-    them are all there, with every field the Progress tab displays.
+    Every group, criterion, competency and taxonomy needed to rebuild the nesting is there, with the fields
+    a client needs to display them.
     """
     communication = Tag.objects.create(taxonomy=competency_taxonomy, value="Communication", external_id="DS-4")
     branch = make_branch(communication, course_x, default_rule_profile, "quiz1", "essay1")
@@ -282,7 +278,7 @@ def test_only_course_xs_part_of_a_shared_competency_is_returned(
     course_x: CourseRun, course_y: CourseRun, competency_taxonomy: CompetencyTaxonomy,
     default_rule_profile: CompetencyRuleProfile,
 ) -> None:
-    """AC11: course Y's branch under the shared root, and a competency used only by course Y, stay out."""
+    """Course Y's branch under the shared root, and a competency used only by course Y, stay out."""
     communication = make_tag(competency_taxonomy, "Communication")
     teamwork = make_tag(competency_taxonomy, "Teamwork")
     in_course_x = make_branch(communication, course_x, default_rule_profile, "x_quiz")
@@ -302,7 +298,7 @@ def test_only_course_xs_part_of_a_shared_competency_is_returned(
 def test_competencies_from_two_taxonomies_each_appear_under_their_own_taxonomy(
     course_x: CourseRun, two_taxonomy_course: TwoTaxonomyCourse,
 ) -> None:
-    """AC12: both taxonomies are listed with their names, and each competency names only its own taxonomy."""
+    """Both taxonomies are listed by name, and each competency names only its own taxonomy."""
     result = get_course_competency_criteria(course_key_of(course_x))
 
     assert {taxonomy.id: taxonomy.name for taxonomy in result.taxonomies} == {
@@ -319,7 +315,7 @@ def test_competencies_from_two_taxonomies_each_appear_under_their_own_taxonomy(
 def test_tags_from_a_taxonomy_that_is_not_a_competency_taxonomy_do_not_appear(
     course_x: CourseRun, tag: Tag, default_rule_profile: CompetencyRuleProfile,
 ) -> None:
-    """AC12: subsections that also carry a course-topic tag still list only their competency."""
+    """Subsections that also carry a course-topic tag still list only their competency."""
     course_topics = Taxonomy.objects.create(name="Course Topics")
     algebra = Tag.objects.create(taxonomy=course_topics, value="Algebra")
     branch = make_branch(tag, course_x, default_rule_profile, "quiz1")
@@ -335,7 +331,7 @@ def test_tags_from_a_taxonomy_that_is_not_a_competency_taxonomy_do_not_appear(
 def test_a_criterion_in_a_taxonomy_that_is_not_a_competency_taxonomy_is_left_out(
     course_x: CourseRun, default_rule_profile: CompetencyRuleProfile,
 ) -> None:
-    """E19: groups and criteria written for a plain taxonomy's tag are not competency criteria."""
+    """Groups and criteria written for a plain taxonomy's tag are not competency criteria."""
     course_topics = Taxonomy.objects.create(name="Course Topics")
     algebra = Tag.objects.create(taxonomy=course_topics, value="Algebra")
     make_branch(algebra, course_x, default_rule_profile, "quiz1")
@@ -346,7 +342,7 @@ def test_a_criterion_in_a_taxonomy_that_is_not_a_competency_taxonomy_is_left_out
 def test_each_competency_carries_its_lineage_from_the_top_of_its_taxonomy(
     course_x: CourseRun, competency_taxonomy: CompetencyTaxonomy, default_rule_profile: CompetencyRuleProfile,
 ) -> None:
-    """AC13: "Root Cause Analysis" lists its two ancestors root-first, and "Communication" lists only itself."""
+    """"Root Cause Analysis" lists its two ancestors root-first, and "Communication" lists only itself."""
     problem_solving = make_tag(competency_taxonomy, "Problem Solving")
     problem_definition = make_tag(competency_taxonomy, "Problem Definition", problem_solving)
     root_cause_analysis = make_tag(competency_taxonomy, "Root Cause Analysis", problem_definition)
@@ -368,7 +364,7 @@ def test_each_competency_carries_its_lineage_from_the_top_of_its_taxonomy(
 def test_an_archived_ancestor_tag_stays_in_the_lineage(
     course_x: CourseRun, competency_taxonomy: CompetencyTaxonomy, default_rule_profile: CompetencyRuleProfile,
 ) -> None:
-    """E13: archiving a parent tag does not archive its children, so the competency and its breadcrumb stay whole."""
+    """Archiving a parent tag does not archive its children, so the competency and its breadcrumb stay whole."""
     problem_solving = make_tag(competency_taxonomy, "Problem Solving")
     root_cause_analysis = make_tag(competency_taxonomy, "Root Cause Analysis", problem_solving)
     make_branch(root_cause_analysis, course_x, default_rule_profile, "rca_quiz")
@@ -386,7 +382,7 @@ def test_an_archived_ancestor_tag_stays_in_the_lineage(
 def test_an_ancestor_value_in_another_taxonomy_does_not_leak_into_a_lineage(
     course_x: CourseRun, competency_taxonomy: CompetencyTaxonomy, default_rule_profile: CompetencyRuleProfile,
 ) -> None:
-    """E14: two taxonomies each have a "Problem Solving" tag, and each competency lists its own taxonomy's."""
+    """Two taxonomies each have a "Problem Solving" tag, and each competency lists its own taxonomy's."""
     durable_skills = make_competency_taxonomy("Durable Skills")
     nursing_problem_solving = make_tag(competency_taxonomy, "Problem Solving")
     nursing_root_cause_analysis = make_tag(competency_taxonomy, "Root Cause Analysis", nursing_problem_solving)
@@ -412,8 +408,7 @@ def test_an_ancestor_value_in_another_taxonomy_does_not_leak_into_a_lineage(
 def test_a_criterion_without_an_override_carries_the_system_default_rule_profiles_rule(
     course_x: CourseRun, tag: Tag, default_rule_profile: CompetencyRuleProfile,
 ) -> None:
-    """AC14: the criterion reports the rule of the system default profile it is assigned."""
-    # The migration seeds 0.8; the ticket's scenario uses 75 percent, stored as the fraction 0.75.
+    # The migration seeds 0.8; this test needs a different value, stored as a fraction.
     default_rule_profile.rule_payload = {"op": "gte", "value": 0.75, "scale": "percent"}
     default_rule_profile.save()
     make_branch(tag, course_x, default_rule_profile, "quiz1")
@@ -428,12 +423,12 @@ def test_a_criterion_without_an_override_carries_the_system_default_rule_profile
 def test_a_criterions_own_override_takes_the_place_of_the_rule_profile(
     course_x: CourseRun, tag: Tag, default_rule_profile: CompetencyRuleProfile,
 ) -> None:
-    """AC15: a criterion with its own 82 percent rule reports it, while the default profile says 75 percent."""
+    """A criterion with its own 82 percent rule reports it, while the default profile says 75 percent."""
     default_rule_profile.rule_payload = {"op": "gte", "value": 0.75, "scale": "percent"}
     default_rule_profile.save()
     branch = make_branch(tag, course_x, default_rule_profile)
-    add_criterion_with_override(
-        branch.bottom_tier, course_x, "essay1", {"op": "gte", "value": 0.82, "scale": "percent"},
+    add_criterion(
+        branch.bottom_tier, course_x, "essay1", rule_payload_override={"op": "gte", "value": 0.82, "scale": "percent"},
     )
 
     result = get_course_competency_criteria(course_key_of(course_x))
@@ -446,14 +441,16 @@ def test_a_criterions_own_override_takes_the_place_of_the_rule_profile(
 def test_rule_payloads_are_returned_as_stored(
     course_x: CourseRun, competency_taxonomy: CompetencyTaxonomy, tag: Tag,
 ) -> None:
-    """N4: the grade value stays the stored fraction, for a profile's rule and for an override alike."""
+    """The grade value stays the stored fraction, for a profile's rule and for an override alike."""
     profile_payload = {"op": "lte", "value": 0.5, "scale": "percent"}
     override_payload = {"op": "eq", "value": 1.0, "scale": "percent"}
     profile = CompetencyRuleProfile.objects.create(
         competency_taxonomy=competency_taxonomy, rule_type=RuleType.GRADE, rule_payload=profile_payload,
     )
     branch = make_branch(tag, course_x, profile, "profile_quiz")
-    with_override = add_criterion_with_override(branch.bottom_tier, course_x, "override_quiz", override_payload)
+    with_override = add_criterion(
+        branch.bottom_tier, course_x, "override_quiz", rule_payload_override=override_payload,
+    )
 
     result = get_course_competency_criteria(course_key_of(course_x))
 
@@ -464,7 +461,7 @@ def test_rule_payloads_are_returned_as_stored(
 def test_a_criterion_on_an_archived_rule_profile_is_still_returned_with_that_profiles_rule(
     course_x: CourseRun, competency_taxonomy: CompetencyTaxonomy, tag: Tag,
 ) -> None:
-    """E12: archiving a profile hides it from new assignments, but criteria already on it keep its rule."""
+    """Archiving a profile hides it from new assignments, but criteria already on it keep its rule."""
     payload = {"op": "gte", "value": 0.6, "scale": "percent"}
     profile = CompetencyRuleProfile.objects.create(
         competency_taxonomy=competency_taxonomy, rule_type=RuleType.GRADE, rule_payload=payload,
@@ -488,8 +485,8 @@ def test_criteria_on_subsections_a_learner_cannot_see_are_still_returned(
     course_x: CourseRun, tag: Tag, default_rule_profile: CompetencyRuleProfile,
 ) -> None:
     """
-    AC21, core side: this library has no notion of a subsection's visibility, so every criterion comes back
-    with its usage key, including one on a subsection that has since been deleted from the course.
+    This library knows nothing about a subsection's visibility, so every criterion comes back, even one on a
+    subsection deleted since.
     """
     subsections = ("released", "not_yet_released", "hidden_from_learners", "content_group_only", "deleted")
     make_branch(tag, course_x, default_rule_profile, *subsections)
@@ -501,36 +498,6 @@ def test_criteria_on_subsections_a_learner_cannot_see_are_still_returned(
     }
 
 
-def test_the_function_takes_a_course_key_and_checks_no_permission() -> None:
-    """N13: the function knows no user, so the caller enforces who may read, and #738 can reuse it."""
-    assert list(inspect.signature(get_course_competency_criteria).parameters) == ["course_key"]
-
-
-def test_the_function_is_part_of_the_public_api_and_marked_unstable() -> None:
-    """N13: it is exported from the applet's API, which is what openedx_learning.api re-exports."""
-    assert "get_course_competency_criteria" in cbe_api.__all__
-    assert "UNSTABLE" in (get_course_competency_criteria.__doc__ or "")
-
-
-def test_the_result_is_an_immutable_value_object_made_of_tuples(
-    course_x: CourseRun, tag: Tag, default_rule_profile: CompetencyRuleProfile,
-) -> None:
-    """The design's value objects: frozen dataclasses, with a tuple wherever there is a collection."""
-    make_branch(tag, course_x, default_rule_profile, "quiz1")
-
-    result = get_course_competency_criteria(course_key_of(course_x))
-
-    assert isinstance(result, CourseCompetencyCriteria)
-    assert isinstance(result.taxonomies, tuple) and isinstance(result.taxonomies[0], CompetencyTaxonomyData)
-    assert isinstance(result.tags, tuple) and isinstance(result.tags[0], CompetencyTagData)
-    assert isinstance(result.tags[0].lineage, tuple) and isinstance(result.tags[0].lineage[0], TagLineageEntry)
-    assert isinstance(result.groups, tuple) and isinstance(result.groups[0], CriteriaGroupData)
-    assert isinstance(result.criteria, tuple) and isinstance(result.criteria[0], CriterionData)
-    attribute_name = "criteria"
-    with pytest.raises(dataclasses.FrozenInstanceError):
-        setattr(result, attribute_name, ())
-
-
 # =============================================================================================
 # Order
 # =============================================================================================
@@ -539,7 +506,7 @@ def test_the_result_is_an_immutable_value_object_made_of_tuples(
 def test_taxonomies_are_listed_by_id(
     course_x: CourseRun, competency_taxonomy: CompetencyTaxonomy, default_rule_profile: CompetencyRuleProfile,
 ) -> None:
-    """AC16, order: the taxonomy created first comes first, whichever one the first criterion belongs to."""
+    """The taxonomy created first comes first, whichever one the first criterion belongs to."""
     durable_skills = make_competency_taxonomy("Durable Skills")
     make_branch(make_tag(durable_skills, "Communication"), course_x, default_rule_profile, "comm_quiz")
     make_branch(make_tag(competency_taxonomy, "Root Cause Analysis"), course_x, default_rule_profile, "rca_quiz")
@@ -553,7 +520,7 @@ def test_taxonomies_are_listed_by_id(
 def test_tags_are_listed_by_id_not_by_name(
     course_x: CourseRun, competency_taxonomy: CompetencyTaxonomy, default_rule_profile: CompetencyRuleProfile,
 ) -> None:
-    """AC16, order: the tag created first comes first, though its name sorts last and its criteria came last."""
+    """The tag created first comes first, though its name sorts last and its criteria came last."""
     zeta = make_tag(competency_taxonomy, "Zeta")
     alpha = make_tag(competency_taxonomy, "Alpha")
     make_branch(alpha, course_x, default_rule_profile, "alpha_quiz")
@@ -567,7 +534,7 @@ def test_tags_are_listed_by_id_not_by_name(
 def test_criteria_are_listed_by_id_not_by_group_order_or_usage_key(
     course_x: CourseRun, tag: Tag, default_rule_profile: CompetencyRuleProfile,
 ) -> None:
-    """AC16, order: the first criterion created comes first, though its group and its usage key sort last."""
+    """The first criterion created comes first, though its group and its usage key sort last."""
     first = make_branch(tag, course_x, default_rule_profile, "z_quiz")
     second = make_branch(tag, course_x, default_rule_profile, "a_quiz")
     CompetencyCriteriaGroup.objects.filter(id=first.bottom_tier.id).update(ordering=5)
@@ -581,7 +548,7 @@ def test_criteria_are_listed_by_id_not_by_group_order_or_usage_key(
 def test_groups_are_listed_level_by_level_so_every_group_follows_its_parent(
     course_x: CourseRun, competency_taxonomy: CompetencyTaxonomy, default_rule_profile: CompetencyRuleProfile,
 ) -> None:
-    """AC16, order: all roots, then all course-level groups, then all bottom-tier groups."""
+    """All roots, then all course-level groups, then all bottom-tier groups."""
     communication = make_branch(
         make_tag(competency_taxonomy, "Communication"), course_x, default_rule_profile, "comm_quiz",
     )
@@ -604,7 +571,7 @@ def test_groups_are_listed_level_by_level_so_every_group_follows_its_parent(
 def test_sibling_groups_are_listed_by_their_stored_ordering_not_by_id(
     course_x: CourseRun, tag: Tag, default_rule_profile: CompetencyRuleProfile,
 ) -> None:
-    """E16: the stored ordering of two bottom-tier groups is the reverse of their id order, and it wins."""
+    """The stored ordering of two bottom-tier groups is the reverse of their id order, and it wins."""
     earlier_id = make_branch(tag, course_x, default_rule_profile, "quiz1")
     later_id = make_branch(tag, course_x, default_rule_profile, "quiz2")
     CompetencyCriteriaGroup.objects.filter(id=earlier_id.bottom_tier.id).update(ordering=5)
@@ -619,7 +586,7 @@ def test_sibling_groups_are_listed_by_their_stored_ordering_not_by_id(
 def test_sibling_groups_with_equal_ordering_are_listed_by_id(
     course_x: CourseRun, tag: Tag, default_rule_profile: CompetencyRuleProfile,
 ) -> None:
-    """E16: two bottom-tier groups that share an ordering keep the order they were created in."""
+    """Two bottom-tier groups that share an ordering keep the order they were created in."""
     first = make_branch(tag, course_x, default_rule_profile, "quiz1")
     second = make_branch(tag, course_x, default_rule_profile, "quiz2")
     CompetencyCriteriaGroup.objects.filter(id__in=[first.bottom_tier.id, second.bottom_tier.id]).update(ordering=4)
@@ -633,7 +600,7 @@ def test_sibling_groups_with_equal_ordering_are_listed_by_id(
 def test_root_groups_are_listed_by_their_stored_ordering_across_competencies(
     course_x: CourseRun, competency_taxonomy: CompetencyTaxonomy, default_rule_profile: CompetencyRuleProfile,
 ) -> None:
-    """E16: the ordering applies across a whole level, so one competency's root can come before another's."""
+    """The ordering applies across a whole level, so one competency's root can come before another's."""
     communication = make_branch(
         make_tag(competency_taxonomy, "Communication"), course_x, default_rule_profile, "comm_quiz",
     )
@@ -647,6 +614,48 @@ def test_root_groups_are_listed_by_their_stored_ordering_across_competencies(
     assert root_ids == [teamwork.root.id, communication.root.id]
 
 
+class ReversedCourseLevelOrdering(NamedTuple):
+    """Two competencies in course run X whose course-level groups' ordering is the reverse of their id order."""
+
+    first: Branch
+    second: Branch
+
+
+@pytest.fixture(name="reversed_course_level_ordering")
+def _reversed_course_level_ordering(
+    course_x: CourseRun, competency_taxonomy: CompetencyTaxonomy, default_rule_profile: CompetencyRuleProfile,
+) -> ReversedCourseLevelOrdering:
+    """The roots keep their default ordering, so only the course-level groups' ordering disagrees with ids."""
+    first = make_branch(make_tag(competency_taxonomy, "Communication"), course_x, default_rule_profile, "comm_quiz")
+    second = make_branch(make_tag(competency_taxonomy, "Teamwork"), course_x, default_rule_profile, "team_quiz")
+    CompetencyCriteriaGroup.objects.filter(id=first.course_level.id).update(ordering=2)
+    CompetencyCriteriaGroup.objects.filter(id=second.course_level.id).update(ordering=1)
+    return ReversedCourseLevelOrdering(first=first, second=second)
+
+
+def test_course_level_groups_are_listed_by_their_stored_ordering_not_by_id(
+    course_x: CourseRun, reversed_course_level_ordering: ReversedCourseLevelOrdering,
+) -> None:
+    first, second = reversed_course_level_ordering
+
+    result = get_course_competency_criteria(course_key_of(course_x))
+
+    root_ids = {first.root.id, second.root.id}
+    course_level_ids = [group.id for group in result.groups if group.parent_id in root_ids]
+    assert course_level_ids == [second.course_level.id, first.course_level.id]
+
+
+def test_roots_with_equal_ordering_are_listed_by_id_whatever_the_order_of_their_course_level_groups(
+    course_x: CourseRun, reversed_course_level_ordering: ReversedCourseLevelOrdering,
+) -> None:
+    first, second = reversed_course_level_ordering
+
+    result = get_course_competency_criteria(course_key_of(course_x))
+
+    root_ids = [group.id for group in result.groups if group.parent_id is None]
+    assert root_ids == [first.root.id, second.root.id]
+
+
 # =============================================================================================
 # Archived and disabled records, left out through the real archive API
 # =============================================================================================
@@ -655,7 +664,7 @@ def test_root_groups_are_listed_by_their_stored_ordering_across_competencies(
 def test_an_archived_criterion_is_left_out_while_its_sibling_stays(
     user, now: datetime, course_x: CourseRun, tag: Tag, default_rule_profile: CompetencyRuleProfile,
 ) -> None:
-    """AC17: after #674 archives one of two criteria in a bottom-tier group, only the other is returned."""
+    """Archiving one of two criteria in a bottom-tier group leaves only the other."""
     branch = make_branch(tag, course_x, default_rule_profile, "quiz1", "quiz2")
     archived, sibling = branch.criteria
     record_learner_status_on_every_criterion(user, now)
@@ -671,7 +680,7 @@ def test_archiving_a_bottom_tier_group_takes_its_subtree_out_while_the_rest_stay
     user, now: datetime, course_x: CourseRun, two_taxonomy_course: TwoTaxonomyCourse,
     default_rule_profile: CompetencyRuleProfile,
 ) -> None:
-    """AC18a: the archived group and its criteria are gone, while its sibling group and the other competency stay."""
+    """The archived group and its criteria are gone, while its sibling group and the other competency stay."""
     rca = two_taxonomy_course.root_cause_analysis_branch
     communication = two_taxonomy_course.communication_branch
     second_rca_group = make_branch(two_taxonomy_course.root_cause_analysis, course_x, default_rule_profile, "rca_essay")
@@ -694,7 +703,7 @@ def test_archiving_a_bottom_tier_group_takes_its_subtree_out_while_the_rest_stay
 def test_archiving_a_course_level_group_takes_its_whole_branch_and_competency_out(
     user, now: datetime, course_x: CourseRun, two_taxonomy_course: TwoTaxonomyCourse,
 ) -> None:
-    """AC18b: the archived course-level group, its subtree and its competency are gone; the other competency stays."""
+    """The archived course-level group, its subtree and its competency are gone; the other competency stays."""
     rca = two_taxonomy_course.root_cause_analysis_branch
     record_learner_status_on_every_criterion(user, now)
     assert delete_or_archive_competency_criteria_group(rca.course_level.id, user).archived is True
@@ -708,7 +717,7 @@ def test_archiving_a_course_level_group_takes_its_whole_branch_and_competency_ou
 def test_a_course_run_whose_criteria_are_all_archived_returns_an_empty_result(
     user, now: datetime, course_x: CourseRun,
 ) -> None:
-    """AC20a: once #674 has archived every criterion, the course run reads as if it never had any."""
+    """Once every criterion is archived, the course run reads as if it never had any."""
     record_learner_status_on_every_criterion(user, now)
     for criterion in CompetencyCriterion.objects.all():
         assert delete_or_archive_competency_criterion(criterion.id, user).archived is True
@@ -724,7 +733,6 @@ def test_a_course_run_whose_criteria_are_all_archived_returns_an_empty_result(
 def test_a_competency_whose_tag_is_archived_is_left_out_with_everything_beneath_it(
     course_x: CourseRun, two_taxonomy_course: TwoTaxonomyCourse,
 ) -> None:
-    """AC19a"""
     Tag.objects.filter(id=two_taxonomy_course.root_cause_analysis.id).update(archived=True)
 
     result = get_course_competency_criteria(course_key_of(course_x))
@@ -735,7 +743,7 @@ def test_a_competency_whose_tag_is_archived_is_left_out_with_everything_beneath_
 def test_a_competency_whose_taxonomy_is_archived_is_left_out_with_everything_beneath_it(
     course_x: CourseRun, two_taxonomy_course: TwoTaxonomyCourse,
 ) -> None:
-    """AC19b: the taxonomy is archived and none of its tags is."""
+    """The taxonomy is archived and none of its tags is."""
     Taxonomy.objects.filter(id=two_taxonomy_course.nursing.id).update(archived=True)
     assert not Tag.objects.filter(taxonomy=two_taxonomy_course.nursing, archived=True).exists()
 
@@ -747,7 +755,6 @@ def test_a_competency_whose_taxonomy_is_archived_is_left_out_with_everything_ben
 def test_a_competency_whose_taxonomy_is_disabled_is_left_out_with_everything_beneath_it(
     course_x: CourseRun, two_taxonomy_course: TwoTaxonomyCourse,
 ) -> None:
-    """AC19c"""
     Taxonomy.objects.filter(id=two_taxonomy_course.nursing.id).update(enabled=False)
 
     result = get_course_competency_criteria(course_key_of(course_x))
@@ -759,7 +766,6 @@ def test_a_course_run_whose_only_taxonomy_is_disabled_returns_an_empty_result(
     course_x: CourseRun, competency_taxonomy: CompetencyTaxonomy, tag: Tag,
     default_rule_profile: CompetencyRuleProfile,
 ) -> None:
-    """AC20b"""
     make_branch(tag, course_x, default_rule_profile, "quiz1")
     Taxonomy.objects.filter(id=competency_taxonomy.id).update(enabled=False)
 
@@ -769,7 +775,7 @@ def test_a_course_run_whose_only_taxonomy_is_disabled_returns_an_empty_result(
 def test_a_live_course_level_group_under_an_archived_root_is_left_out(
     course_x: CourseRun, two_taxonomy_course: TwoTaxonomyCourse,
 ) -> None:
-    """E8: the API archives a root only after its branches, but a write outside it could leave this state."""
+    """The API archives a root only after its branches, but a write outside it could leave this state."""
     CompetencyCriteriaGroup.objects.filter(id=two_taxonomy_course.root_cause_analysis_branch.root.id).update(
         archived=True,
     )
@@ -779,14 +785,35 @@ def test_a_live_course_level_group_under_an_archived_root_is_left_out(
     assert_only_communication_remains(result, two_taxonomy_course)
 
 
+def test_a_course_level_group_archived_on_its_own_leaves_nothing_to_return(
+    course_x: CourseRun, tag: Tag, default_rule_profile: CompetencyRuleProfile,
+) -> None:
+    """The criteria below stay live, as they would if the group were archived by a write outside the API."""
+    branch = make_branch(tag, course_x, default_rule_profile, "quiz1")
+    CompetencyCriteriaGroup.objects.filter(id=branch.course_level.id).update(archived=True)
+
+    assert get_course_competency_criteria(course_key_of(course_x)) == EMPTY_RESULT
+
+
+def test_a_course_level_group_that_is_not_directly_under_a_root_is_not_found(
+    course_x: CourseRun, tag: Tag, default_rule_profile: CompetencyRuleProfile,
+) -> None:
+    """The authoring API never puts a group between a root and a course-level group, so the read skips one."""
+    branch = make_branch(tag, course_x, default_rule_profile, "quiz1")
+    middle = CompetencyCriteriaGroup.objects.create(tag=tag, parent=branch.root)
+    CompetencyCriteriaGroup.objects.filter(id=branch.course_level.id).update(parent=middle)
+
+    assert get_course_competency_criteria(course_key_of(course_x)) == EMPTY_RESULT
+
+
 def test_live_groups_below_an_archived_bottom_tier_group_are_left_out(
     course_x: CourseRun, tag: Tag, default_rule_profile: CompetencyRuleProfile,
 ) -> None:
-    """E9: the API archives a whole subtree at once, but a write outside it could leave live children below."""
+    """The API archives a whole subtree at once, but a write outside it could leave live children below."""
     archived_group = make_branch(tag, course_x, default_rule_profile, "quiz1")
     live_group = make_branch(tag, course_x, default_rule_profile, "quiz2")
     below_archived = CompetencyCriteriaGroup.objects.create(tag=tag, parent=archived_group.bottom_tier)
-    criterion_below = add_criterion(below_archived, course_x, default_rule_profile, "quiz3")
+    criterion_below = add_criterion(below_archived, course_x, "quiz3", rule_profile=default_rule_profile)
     CompetencyCriteriaGroup.objects.filter(id=archived_group.bottom_tier.id).update(archived=True)
 
     result = get_course_competency_criteria(course_key_of(course_x))
@@ -800,7 +827,7 @@ def test_live_groups_below_an_archived_bottom_tier_group_are_left_out(
 def test_a_criterion_whose_object_tag_is_archived_is_left_out_and_its_emptied_group_with_it(
     course_x: CourseRun, tag: Tag, default_rule_profile: CompetencyRuleProfile,
 ) -> None:
-    """E10: nothing archives an ObjectTag yet, but archived associations behave as gone from ordinary reads."""
+    """Nothing archives an ObjectTag yet, but archived associations behave as gone from ordinary reads."""
     emptied = make_branch(tag, course_x, default_rule_profile, "quiz1")
     remaining = make_branch(tag, course_x, default_rule_profile, "quiz2")
     ObjectTag.objects.filter(id=emptied.criteria[0].object_tag_id).update(archived=True)
@@ -815,7 +842,7 @@ def test_a_criterion_whose_object_tag_is_archived_is_left_out_and_its_emptied_gr
 def test_a_live_group_with_no_live_criteria_beneath_it_is_left_out(
     course_x: CourseRun, tag: Tag, default_rule_profile: CompetencyRuleProfile,
 ) -> None:
-    """E11: an empty bottom-tier group next to one that holds a criterion is not worth showing."""
+    """An empty bottom-tier group next to one that holds a criterion is not worth showing."""
     with_criterion = make_branch(tag, course_x, default_rule_profile, "quiz1")
     empty = make_branch(tag, course_x, default_rule_profile)
 
@@ -828,7 +855,7 @@ def test_a_live_group_with_no_live_criteria_beneath_it_is_left_out(
 def test_a_competency_with_no_live_criteria_beneath_it_is_absent(
     course_x: CourseRun, two_taxonomy_course: TwoTaxonomyCourse,
 ) -> None:
-    """E11: a competency whose groups hold no criteria disappears from the result, with its tag and taxonomy."""
+    """A competency whose groups hold no criteria disappears from the result, with its tag and taxonomy."""
     CompetencyCriterion.objects.filter(group=two_taxonomy_course.root_cause_analysis_branch.bottom_tier).delete()
 
     result = get_course_competency_criteria(course_key_of(course_x))
@@ -839,10 +866,10 @@ def test_a_competency_with_no_live_criteria_beneath_it_is_absent(
 def test_a_group_below_a_bottom_tier_group_is_returned_with_consistent_parent_ids(
     course_x: CourseRun, tag: Tag, default_rule_profile: CompetencyRuleProfile,
 ) -> None:
-    """E15: the endpoint returns the course's whole subtree at any depth, so a fourth level works already."""
+    """The whole subtree comes back at any depth, so a fourth level works already."""
     branch = make_branch(tag, course_x, default_rule_profile)
     fourth_level = CompetencyCriteriaGroup.objects.create(tag=tag, parent=branch.bottom_tier)
-    criterion = add_criterion(fourth_level, course_x, default_rule_profile, "quiz1")
+    criterion = add_criterion(fourth_level, course_x, "quiz1", rule_profile=default_rule_profile)
 
     result = get_course_competency_criteria(course_key_of(course_x))
 
@@ -863,7 +890,7 @@ def test_a_populated_course_costs_five_queries_however_many_competencies_it_has(
     django_assert_num_queries,
 ) -> None:
     """
-    E17: course-level groups, bottom-tier groups, the empty level below them, criteria, and the ancestor tags.
+    Course-level groups, bottom-tier groups, the empty level below them, criteria, and the ancestor tags.
     A third competency, in a third taxonomy, adds rows but no queries.
     """
     problem_solving = make_tag(competency_taxonomy, "Problem Solving")

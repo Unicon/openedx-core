@@ -6,6 +6,8 @@ layer decides: authentication, key parsing, the permission, status codes, and th
 
 Fixtures live in this directory's conftest.py, the tree builders in utils.py.
 """
+from urllib.parse import quote
+
 import pytest
 import rules
 from django.contrib.auth import get_user_model
@@ -15,6 +17,7 @@ from rest_framework import status
 from rest_framework.test import APIClient
 
 from openedx_catalog.models import CourseRun
+from openedx_learning.applets.cbe.rest_api.v1 import views
 from openedx_learning.models import CompetencyCriteriaGroup, CompetencyRuleProfile, CompetencyTaxonomy
 from openedx_tagging.models import Tag
 
@@ -65,7 +68,6 @@ def make_course_with_criteria(
 def test_a_caller_who_is_not_signed_in_is_rejected_with_no_competency_data(
     api_client: APIClient, course_x: CourseRun, tag: Tag, default_rule_profile: CompetencyRuleProfile,
 ) -> None:
-    """AC1"""
     usage = make_course_with_criteria(course_x, tag, default_rule_profile)
 
     response = api_client.get(criteria_url(course_key_of(course_x)))
@@ -78,7 +80,7 @@ def test_a_caller_who_is_not_signed_in_is_rejected_with_no_competency_data(
 def test_any_signed_in_user_can_read_the_criteria_under_the_default_permission(
     user_client: APIClient, course_x: CourseRun, tag: Tag, default_rule_profile: CompetencyRuleProfile,
 ) -> None:
-    """AC2: a user who is not staff and has no enrollment in the course run still gets the full result."""
+    """A user who is not staff and has no enrollment in the course run still gets the full result."""
     usage = make_course_with_criteria(course_x, tag, default_rule_profile)
 
     response = user_client.get(criteria_url(course_key_of(course_x)))
@@ -92,7 +94,7 @@ def test_any_signed_in_user_can_read_the_criteria_under_the_default_permission(
 def test_a_host_rule_that_refuses_gives_403_and_no_competency_data(
     user_client: APIClient, course_x: CourseRun, tag: Tag, default_rule_profile: CompetencyRuleProfile,
 ) -> None:
-    """AC6a, E7: a host that rebinds the permission after core loaded decides, and a refusal returns nothing."""
+    """A host that rebinds the permission after core loaded decides, and a refusal returns nothing."""
     usage = make_course_with_criteria(course_x, tag, default_rule_profile)
     rules.set_perm(VIEW_COURSE_COMPETENCY_CRITERIA, rules.always_deny)
 
@@ -107,7 +109,7 @@ def test_a_host_rule_that_refuses_gives_403_and_no_competency_data(
 def test_a_host_rule_that_decides_per_user_lets_one_caller_in_and_refuses_another(
     user_client: APIClient, course_x: CourseRun, tag: Tag, default_rule_profile: CompetencyRuleProfile,
 ) -> None:
-    """AC6a: the host's rule sees the signed-in user, so an enrolled learner is read while a stranger is refused."""
+    """The host's rule sees the signed-in user, so an enrolled learner is read while a stranger is refused."""
     make_course_with_criteria(course_x, tag, default_rule_profile)
     enrolled_learner = get_user_model().objects.create(username="enrolled_learner")
     enrolled_client = APIClient()
@@ -120,7 +122,7 @@ def test_a_host_rule_that_decides_per_user_lets_one_caller_in_and_refuses_anothe
 
 @pytest.mark.usefixtures("restore_permission_registry")
 def test_the_permission_is_checked_against_the_parsed_course_key(user_client: APIClient, user) -> None:
-    """N2: the host's rule receives the signed-in user and a CourseKey, not the string from the path."""
+    """The host's rule receives the signed-in user and a CourseKey, not the string from the path."""
     received = []
 
     def recording_rule(rule_user, course_key) -> bool:
@@ -141,7 +143,7 @@ def test_a_refused_request_reads_no_competency_data(
     user_client: APIClient, course_x: CourseRun, tag: Tag, default_rule_profile: CompetencyRuleProfile,
     django_assert_num_queries,
 ) -> None:
-    """N12: the permission is checked before any query, so a refused caller costs the database nothing."""
+    """The permission is checked before any query, so a refused caller costs the database nothing."""
     make_course_with_criteria(course_x, tag, default_rule_profile)
     rules.set_perm(VIEW_COURSE_COMPETENCY_CRITERIA, rules.always_deny)
 
@@ -160,7 +162,7 @@ def test_every_permitted_caller_gets_the_same_result(
     user_client: APIClient, staff_client: APIClient, course_x: CourseRun, competency_taxonomy: CompetencyTaxonomy,
     default_rule_profile: CompetencyRuleProfile,
 ) -> None:
-    """AC22, core side: two different signed-in users and a staff user receive identical bodies."""
+    """Two different signed-in users and a staff user receive identical bodies."""
     make_branch(make_tag(competency_taxonomy, "Communication"), course_x, default_rule_profile, "comm_quiz")
     make_branch(make_tag(competency_taxonomy, "Teamwork"), course_x, default_rule_profile, "team_quiz")
     other_learner_client = APIClient()
@@ -181,7 +183,6 @@ def test_every_permitted_caller_gets_the_same_result(
 def test_a_malformed_course_run_key_is_rejected_with_a_message_and_no_data(
     user_client: APIClient, course_x: CourseRun, tag: Tag, default_rule_profile: CompetencyRuleProfile,
 ) -> None:
-    """AC8"""
     make_course_with_criteria(course_x, tag, default_rule_profile)
 
     response = user_client.get(literal_path("not-a-course-key"))
@@ -193,7 +194,6 @@ def test_a_malformed_course_run_key_is_rejected_with_a_message_and_no_data(
 def test_a_course_run_in_the_catalog_without_criteria_returns_an_empty_body(
     user_client: APIClient, course_x: CourseRun,
 ) -> None:
-    """AC9a"""
     response = user_client.get(criteria_url(course_key_of(course_x)))
 
     assert response.status_code == status.HTTP_200_OK
@@ -201,7 +201,6 @@ def test_a_course_run_in_the_catalog_without_criteria_returns_an_empty_body(
 
 
 def test_a_well_formed_key_matching_no_course_run_returns_an_empty_body(user_client: APIClient) -> None:
-    """AC9b"""
     response = user_client.get(criteria_url("course-v1:Nowhere+Missing+Run"))
 
     assert response.status_code == status.HTTP_200_OK
@@ -216,7 +215,7 @@ def test_a_well_formed_key_matching_no_course_run_returns_an_empty_body(user_cli
 def test_a_course_key_with_a_raw_plus_resolves(
     user_client: APIClient, course_x: CourseRun, tag: Tag, default_rule_profile: CompetencyRuleProfile,
 ) -> None:
-    """E1: a plus stays a plus in the path, where a query string would have turned it into a space."""
+    """A plus stays a plus in the path, where a query string would have turned it into a space."""
     usage = make_course_with_criteria(course_x, tag, default_rule_profile)
     assert "+" in str(course_key_of(course_x))
 
@@ -229,7 +228,7 @@ def test_a_course_key_with_a_raw_plus_resolves(
 def test_a_course_key_with_an_encoded_plus_resolves_to_the_same_course_run(
     user_client: APIClient, course_x: CourseRun, tag: Tag, default_rule_profile: CompetencyRuleProfile,
 ) -> None:
-    """E1: a client that percent-encodes the plus as %2B reaches the same course run."""
+    """A client that percent-encodes the plus as %2B reaches the same course run."""
     usage = make_course_with_criteria(course_x, tag, default_rule_profile)
 
     response = user_client.get(literal_path(str(course_key_of(course_x)).replace("+", "%2B")))
@@ -239,7 +238,7 @@ def test_a_course_key_with_an_encoded_plus_resolves_to_the_same_course_run(
 
 
 def test_a_deprecated_slash_key_is_accepted_and_has_no_criteria(user_client: APIClient) -> None:
-    """E2: Org/Course/Run keys contain slashes, and they reach the view instead of failing to route."""
+    """Org/Course/Run keys contain slashes, and they reach the view instead of failing to route."""
     response = user_client.get(literal_path("Org1/Python100/Fall2026"))
 
     assert response.status_code == status.HTTP_200_OK
@@ -247,7 +246,7 @@ def test_a_deprecated_slash_key_is_accepted_and_has_no_criteria(user_client: API
 
 
 def test_a_ccx_key_is_accepted_and_has_no_criteria(user_client: APIClient) -> None:
-    """E3: a CCX key is a course key, so it is not malformed; it just has no criteria of its own."""
+    """A CCX key is a course key, so it is not malformed; it just has no criteria of its own."""
     response = user_client.get(literal_path("ccx-v1:Org1+Python100+Fall2026+ccx@1"))
 
     assert response.status_code == status.HTTP_200_OK
@@ -258,66 +257,84 @@ def test_a_ccx_key_is_accepted_and_has_no_criteria(user_client: APIClient) -> No
 # Values that are not a course run key
 # =============================================================================================
 
+KEY_PREFIX = "course-v1:Org1+Python100+"
 
-def assert_rejected_as_malformed(response, submitted_value: str) -> None:
-    """Assert a 400 with the fixed message, which must not repeat what the caller sent."""
+
+def key_of_length(length: int) -> str:
+    """Return a well-formed course key that is exactly `length` characters long."""
+    return KEY_PREFIX + "R" * (length - len(KEY_PREFIX))
+
+
+@pytest.mark.parametrize(
+    "submitted",
+    [
+        pytest.param("course-v1:Org1+Python100+Fall2026+branch@draft-branch", id="branch"),
+        pytest.param("course-v1:Org1+Python100+Fall2026+version@5f3e1d2c8a1b2c3d4e5f6a7b", id="version"),
+        pytest.param("version@5f3e1d2c8a1b2c3d4e5f6a7b", id="version only"),
+        pytest.param("library-v1:Org1+Library1", id="library key"),
+        pytest.param("lib:Org1:Library1", id="v2 library key"),
+        pytest.param(key_of_length(256), id="256 characters"),
+        pytest.param(key_of_length(300), id="300 characters"),
+        pytest.param("x", id="single character"),
+        pytest.param("course-v1:Org1+Python100+Fall2026/extra", id="slash after a valid key"),
+        pytest.param(" course-v1:Org1+Python100+Fall2026", id="leading space"),
+        pytest.param("course-v1:Org1+Python100+Fall2026 ", id="trailing space"),
+    ],
+)
+def test_a_value_that_is_not_the_plain_key_of_a_course_run_is_rejected(
+    user_client: APIClient, submitted: str,
+) -> None:
+    response = user_client.get(literal_path(quote(submitted, safe=":+@/")))
+
     assert response.status_code == status.HTTP_400_BAD_REQUEST
+    # The body is fixed text, so it cannot contain what the caller sent.
     assert response.json() == MALFORMED_KEY_BODY
-    assert submitted_value not in response.content.decode()
+    assert submitted not in response.content.decode()
 
 
-def test_a_key_with_a_branch_is_rejected(user_client: APIClient) -> None:
-    """E5"""
-    submitted = "course-v1:Org1+Python100+Fall2026+branch@draft-branch"
+def test_a_key_of_exactly_255_characters_is_well_formed(user_client: APIClient) -> None:
+    """255 is the longest key the catalog can store, so a key that long is looked up, not rejected."""
+    response = user_client.get(literal_path(key_of_length(255)))
 
-    assert_rejected_as_malformed(user_client.get(literal_path(submitted)), submitted)
-
-
-def test_a_key_with_a_version_is_rejected(user_client: APIClient) -> None:
-    """E5"""
-    submitted = "course-v1:Org1+Python100+Fall2026+version@5f3e1d2c8a1b2c3d4e5f6a7b"
-
-    assert_rejected_as_malformed(user_client.get(literal_path(submitted)), submitted)
+    assert response.status_code == status.HTTP_200_OK
+    assert response.json() == EMPTY_BODY
 
 
-def test_a_version_on_its_own_is_rejected(user_client: APIClient) -> None:
-    """E5"""
-    submitted = "version@5f3e1d2c8a1b2c3d4e5f6a7b"
-
-    assert_rejected_as_malformed(user_client.get(literal_path(submitted)), submitted)
+# =============================================================================================
+# Authentication
+# =============================================================================================
 
 
-def test_a_library_key_is_rejected(user_client: APIClient) -> None:
-    """E5: a library-v1 key parses, but it is not a course run."""
-    submitted = "library-v1:Org1+Library1"
-
-    assert_rejected_as_malformed(user_client.get(literal_path(submitted)), submitted)
-
-
-def test_a_v2_library_key_is_rejected(user_client: APIClient) -> None:
-    """E5: a lib: key does not parse as a course key at all."""
-    submitted = "lib:Org1:Library1"
-
-    assert_rejected_as_malformed(user_client.get(literal_path(submitted)), submitted)
+@pytest.fixture(name="real_login_backends")
+def _real_login_backends(settings) -> None:
+    """Let Django log users in for real: the test settings list only the permission backend, which cannot."""
+    settings.AUTHENTICATION_BACKENDS = [
+        "django.contrib.auth.backends.ModelBackend",
+        "rules.permissions.ObjectPermissionBackend",
+    ]
 
 
-def test_a_key_over_255_characters_is_rejected(user_client: APIClient) -> None:
-    """E5: the key is otherwise well-formed, so only its length gives it away."""
-    submitted = "course-v1:Org1+Python100+" + "R" * 250
+@pytest.mark.usefixtures("real_login_backends")
+def test_a_user_signed_in_with_a_session_is_accepted(
+    user, course_x: CourseRun, tag: Tag, default_rule_profile: CompetencyRuleProfile,
+) -> None:
+    make_course_with_criteria(course_x, tag, default_rule_profile)
+    client = APIClient()
+    client.force_login(user)
 
-    assert_rejected_as_malformed(user_client.get(literal_path(submitted)), submitted)
+    response = client.get(criteria_url(course_key_of(course_x)))
+
+    assert response.status_code == status.HTTP_200_OK
+    assert len(response.json()["criteria"]) == 1
 
 
-def test_a_single_character_is_rejected(user_client: APIClient) -> None:
-    """E5: junk as short as it gets still reaches the view and is answered with the fixed message."""
-    assert_rejected_as_malformed(user_client.get(literal_path("x")), "x")
+def test_jwt_authentication_stays_enabled() -> None:
+    """
+    The Learning MFE calls this endpoint with a JWT cookie, so JWT authentication must stay enabled.
 
-
-def test_a_malformed_value_containing_slashes_reaches_the_view_and_is_rejected(user_client: APIClient) -> None:
-    """E5: the router does not turn it into a 404, because the key part of the path accepts slashes."""
-    submitted = "course-v1:Org1+Python100+Fall2026/extra"
-
-    assert_rejected_as_malformed(user_client.get(literal_path(submitted)), submitted)
+    Decoding a real JWT needs an LMS's JWT settings, so the LMS integration run covers that end to end.
+    """
+    assert views.JwtAuthentication in views.CourseCompetencyCriteriaView.authentication_classes
 
 
 # =============================================================================================
@@ -326,7 +343,7 @@ def test_a_malformed_value_containing_slashes_reaches_the_view_and_is_rejected(u
 
 
 def test_a_caller_who_is_not_signed_in_is_rejected_before_the_key_is_parsed(api_client: APIClient) -> None:
-    """N12: authentication comes first, so an anonymous caller learns nothing about what makes a key malformed."""
+    """Authentication comes first, so an anonymous caller learns nothing about what makes a key malformed."""
     response = api_client.get(literal_path("not-a-course-key"))
 
     assert response.status_code == status.HTTP_401_UNAUTHORIZED
@@ -334,7 +351,7 @@ def test_a_caller_who_is_not_signed_in_is_rejected_before_the_key_is_parsed(api_
 
 @pytest.mark.usefixtures("restore_permission_registry")
 def test_a_malformed_key_is_rejected_before_the_permission_is_asked(user_client: APIClient) -> None:
-    """N12: the permission needs a parsed key, so a value that does not parse never reaches the host's rule."""
+    """The permission needs a parsed key, so a value that does not parse never reaches the host's rule."""
     asked = []
 
     def recording_rule(_user, course_key) -> bool:
@@ -350,7 +367,7 @@ def test_a_malformed_key_is_rejected_before_the_permission_is_asked(user_client:
 
 
 def test_a_malformed_key_costs_no_queries(user_client: APIClient, django_assert_num_queries) -> None:
-    """N12: nothing is read from the database for a value that is not a course key."""
+    """Nothing is read from the database for a value that is not a course key."""
     with django_assert_num_queries(0):
         response = user_client.get(literal_path("not-a-course-key"))
 
@@ -367,8 +384,8 @@ def test_the_response_body_has_exactly_the_documented_shape(
     default_rule_profile: CompetencyRuleProfile,
 ) -> None:
     """
-    AC10, N5: every field the Progress tab needs, each reference named after the array it points into, and
-    nothing else: no course key, rule profile id, override columns, object tag id, or course run id.
+    Each reference is named after the array it points into, and nothing else is exposed: no course key, rule profile id,
+    override columns, object tag id, or course run id.
     """
     problem_solving = make_tag(competency_taxonomy, "Problem Solving")
     root_cause_analysis = Tag.objects.create(
@@ -427,7 +444,7 @@ def test_repeated_requests_list_everything_in_the_same_order(
     user_client: APIClient, course_x: CourseRun, competency_taxonomy: CompetencyTaxonomy,
     default_rule_profile: CompetencyRuleProfile,
 ) -> None:
-    """AC16: several competencies across two taxonomies come back in one order, request after request."""
+    """Several competencies across two taxonomies come back in one order, request after request."""
     durable_skills = make_competency_taxonomy("Durable Skills")
     make_branch(make_tag(durable_skills, "Communication"), course_x, default_rule_profile, "comm_quiz", "comm_essay")
     make_branch(make_tag(competency_taxonomy, "Root Cause Analysis"), course_x, default_rule_profile, "rca_quiz")
@@ -449,14 +466,12 @@ def test_repeated_requests_list_everything_in_the_same_order(
 
 @pytest.mark.parametrize("method", ["post", "put", "patch", "delete"])
 def test_methods_that_would_write_are_not_allowed(user_client: APIClient, course_x: CourseRun, method: str) -> None:
-    """E18"""
     response = getattr(user_client, method)(criteria_url(course_key_of(course_x)))
 
     assert response.status_code == status.HTTP_405_METHOD_NOT_ALLOWED
 
 
 def test_head_is_allowed(user_client: APIClient, course_x: CourseRun) -> None:
-    """E18"""
     response = user_client.head(criteria_url(course_key_of(course_x)))
 
     assert response.status_code == status.HTTP_200_OK
@@ -468,14 +483,14 @@ def test_head_is_allowed(user_client: APIClient, course_x: CourseRun) -> None:
 
 
 def test_the_route_lives_under_the_cbe_v1_prefix_with_the_key_in_the_path() -> None:
-    """The planned sibling statuses endpoint uses the same courses/<course_key>/ shape, so the key stays literal."""
+    """The course key is part of the path, under the prefix the authoring routes use."""
     assert criteria_url("course-v1:Org1+Python100+Fall2026") == (
         "/api/cbe/v1/courses/course-v1:Org1+Python100+Fall2026/competency-criteria/"
     )
 
 
 def test_the_learner_urls_resolve_the_learner_route() -> None:
-    """AC7: what an LMS mounts does include the endpoint."""
+    """The URLs an LMS mounts include the endpoint."""
     match = resolve(literal_path("course-v1:Org1+Python100+Fall2026"), urlconf=LMS_URLCONF)
 
     assert match.view_name == "cbe_learner:course-competency-criteria"
@@ -495,7 +510,7 @@ def test_the_learner_urls_resolve_the_learner_route() -> None:
     ],
 )
 def test_the_learner_urls_serve_no_authoring_route(authoring_path: str) -> None:
-    """AC7: an LMS that mounts only the learner URLs answers every authoring route with "no such route"."""
+    """An LMS that mounts only the learner URLs answers every authoring route with "no such route"."""
     resolve(authoring_path)  # The same path does exist where the authoring URLs are mounted.
 
     with pytest.raises(Resolver404):
@@ -503,5 +518,5 @@ def test_the_learner_urls_serve_no_authoring_route(authoring_path: str) -> None:
 
 
 def test_the_authoring_routes_still_live_at_cbe_v1() -> None:
-    """N10: adding learner routes did not move the authoring ones that the CMS mounts."""
+    """Adding learner routes did not move the authoring ones that the CMS mounts."""
     assert reverse("cbe:rule_profile-list") == "/api/cbe/v1/rule_profiles/"

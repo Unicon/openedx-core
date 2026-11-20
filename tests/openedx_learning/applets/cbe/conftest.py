@@ -20,6 +20,8 @@ from openedx_learning.models import (
 )
 from openedx_tagging.models import ObjectTag, Tag
 
+from .utils import make_course_run
+
 
 @pytest.fixture(name="organization")
 def _organization() -> Organization:
@@ -51,8 +53,7 @@ def _course_x(course_run: CourseRun) -> CourseRun:
 @pytest.fixture(name="course_y")
 def _course_y(organization: Organization) -> CourseRun:
     """Course run Y, a second course run that shares competencies with course run X."""
-    catalog_course = CatalogCourse.objects.create(org=organization, course_code="Python200")
-    return CourseRun.objects.create(catalog_course=catalog_course, run_code="Spring2027")
+    return make_course_run(organization, "Python200", "Spring2027")
 
 
 @pytest.fixture(name="competency_taxonomy")

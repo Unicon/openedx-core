@@ -94,19 +94,18 @@ def may_view_course_criteria(caller: UserType, course_key: CourseKey) -> bool:
 
 
 def test_the_course_criteria_permission_name_is_exported_under_its_contract_name() -> None:
-    """N2: openedx-platform binds this exact name, so it is part of the public contract."""
+    """The name openedx-platform binds its own rule to is part of the public contract."""
     assert cbe_rules.VIEW_COURSE_COMPETENCY_CRITERIA == VIEW_COURSE_COMPETENCY_CRITERIA
     assert "VIEW_COURSE_COMPETENCY_CRITERIA" in cbe_rules.__all__
     assert openedx_learning.rules.VIEW_COURSE_COMPETENCY_CRITERIA == VIEW_COURSE_COMPETENCY_CRITERIA
 
 
 def test_the_course_criteria_permission_is_registered_by_default() -> None:
-    """N2"""
     assert rules.perm_exists(VIEW_COURSE_COMPETENCY_CRITERIA)
 
 
 def test_anonymous_callers_are_refused_the_course_criteria_by_default() -> None:
-    """N2: the default rule is rules.is_authenticated."""
+    """The default rule admits anyone signed in, and nobody else."""
     assert rules.perm_exists(VIEW_COURSE_COMPETENCY_CRITERIA)
     assert may_view_course_criteria(AnonymousUser(), COURSE_KEY) is False
 
@@ -116,7 +115,7 @@ def test_any_signed_in_user_may_read_the_course_criteria_by_default(
     request: pytest.FixtureRequest,
     user_fixture: str,
 ) -> None:
-    """N2: neither enrollment nor staff membership matters under the default rule."""
+    """Neither enrollment nor staff membership matters under the default rule."""
     caller = request.getfixturevalue(user_fixture)
 
     assert may_view_course_criteria(caller, COURSE_KEY) is True
@@ -124,7 +123,7 @@ def test_any_signed_in_user_may_read_the_course_criteria_by_default(
 
 @pytest.mark.usefixtures("restore_permission_registry")
 def test_a_host_rule_bound_after_core_loaded_replaces_the_default(user: UserType) -> None:
-    """E7: the host's set_perm wins, and its rule is asked with the course key."""
+    """The host's set_perm wins, and its rule is asked with the course key."""
     assert rules.perm_exists(VIEW_COURSE_COMPETENCY_CRITERIA)
     rules.set_perm(VIEW_COURSE_COMPETENCY_CRITERIA, lambda _user, course_key: course_key == COURSE_KEY)
 
@@ -135,7 +134,7 @@ def test_a_host_rule_bound_after_core_loaded_replaces_the_default(user: UserType
 @pytest.mark.usefixtures("restore_permission_registry")
 def test_a_host_rule_registered_before_core_loads_stays_in_force(user: UserType) -> None:
     """
-    E6: the host registers the name first, then core's rules module loads.
+    The host registers the name first, then core's rules module loads.
 
     The module is reloaded to play that second step. It registers the other permission too, which the
     reload would find already registered, so that one is removed first; it is not under test.
