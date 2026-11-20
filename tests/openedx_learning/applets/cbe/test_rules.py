@@ -4,6 +4,7 @@ Tests for the CBE permission predicates.
 Fixtures live in this directory's conftest.py.
 """
 import importlib
+from typing import Any
 
 import pytest
 import rules
@@ -86,6 +87,12 @@ def test_anonymous_callers_are_refused_by_the_registered_permission(
 # view_course_competency_criteria
 
 
+def may_view_course_criteria(caller: UserType, course_key: CourseKey) -> bool:
+    """Ask ``has_perm`` whether `caller` may read `course_key`'s criteria; the stubs type the object as a Model."""
+    permission_object: Any = course_key
+    return caller.has_perm(VIEW_COURSE_COMPETENCY_CRITERIA, permission_object)
+
+
 def test_the_course_criteria_permission_name_is_exported_under_its_contract_name() -> None:
     """N2: openedx-platform binds this exact name, so it is part of the public contract."""
     assert cbe_rules.VIEW_COURSE_COMPETENCY_CRITERIA == VIEW_COURSE_COMPETENCY_CRITERIA
@@ -101,7 +108,7 @@ def test_the_course_criteria_permission_is_registered_by_default() -> None:
 def test_anonymous_callers_are_refused_the_course_criteria_by_default() -> None:
     """N2: the default rule is rules.is_authenticated."""
     assert rules.perm_exists(VIEW_COURSE_COMPETENCY_CRITERIA)
-    assert AnonymousUser().has_perm(VIEW_COURSE_COMPETENCY_CRITERIA, COURSE_KEY) is False
+    assert may_view_course_criteria(AnonymousUser(), COURSE_KEY) is False
 
 
 @pytest.mark.parametrize("user_fixture", ["staff_user", "user"])
@@ -112,7 +119,7 @@ def test_any_signed_in_user_may_read_the_course_criteria_by_default(
     """N2: neither enrollment nor staff membership matters under the default rule."""
     caller = request.getfixturevalue(user_fixture)
 
-    assert caller.has_perm(VIEW_COURSE_COMPETENCY_CRITERIA, COURSE_KEY) is True
+    assert may_view_course_criteria(caller, COURSE_KEY) is True
 
 
 @pytest.mark.usefixtures("restore_permission_registry")
@@ -121,8 +128,8 @@ def test_a_host_rule_bound_after_core_loaded_replaces_the_default(user: UserType
     assert rules.perm_exists(VIEW_COURSE_COMPETENCY_CRITERIA)
     rules.set_perm(VIEW_COURSE_COMPETENCY_CRITERIA, lambda _user, course_key: course_key == COURSE_KEY)
 
-    assert user.has_perm(VIEW_COURSE_COMPETENCY_CRITERIA, COURSE_KEY) is True
-    assert user.has_perm(VIEW_COURSE_COMPETENCY_CRITERIA, OTHER_COURSE_KEY) is False
+    assert may_view_course_criteria(user, COURSE_KEY) is True
+    assert may_view_course_criteria(user, OTHER_COURSE_KEY) is False
 
 
 @pytest.mark.usefixtures("restore_permission_registry")
@@ -139,5 +146,5 @@ def test_a_host_rule_registered_before_core_loads_stays_in_force(user: UserType)
 
     importlib.reload(cbe_rules)
 
-    assert user.has_perm(VIEW_COURSE_COMPETENCY_CRITERIA, COURSE_KEY) is True
-    assert user.has_perm(VIEW_COURSE_COMPETENCY_CRITERIA, OTHER_COURSE_KEY) is False
+    assert may_view_course_criteria(user, COURSE_KEY) is True
+    assert may_view_course_criteria(user, OTHER_COURSE_KEY) is False

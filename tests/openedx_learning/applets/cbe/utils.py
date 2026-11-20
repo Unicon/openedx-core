@@ -1,6 +1,7 @@
 """Shared test helpers for the CBE test modules."""
 from typing import NamedTuple
 
+from opaque_keys.edx.keys import CourseKey
 from organizations.models import Organization
 
 from openedx_catalog.models import CatalogCourse, CourseRun
@@ -13,6 +14,13 @@ from openedx_learning.models import (
     RuleType,
 )
 from openedx_tagging.models import ObjectTag, Tag
+
+
+def course_key_of(course_run: CourseRun) -> CourseKey:
+    """Return `course_run`'s course key, which the model types as optional although every saved row has one."""
+    key = course_run.course_key
+    assert key is not None
+    return key
 
 
 def usage_key(course_run: CourseRun, block_id: str) -> str:

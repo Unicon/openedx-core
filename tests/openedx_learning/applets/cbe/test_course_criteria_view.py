@@ -9,7 +9,7 @@ Fixtures live in this directory's conftest.py, the tree builders in utils.py.
 import pytest
 import rules
 from django.contrib.auth import get_user_model
-from django.urls import Resolver404, include, path, resolve, reverse
+from django.urls import Resolver404, resolve, reverse
 from opaque_keys.edx.keys import CourseKey
 from rest_framework import status
 from rest_framework.test import APIClient
@@ -18,25 +18,17 @@ from openedx_catalog.models import CourseRun
 from openedx_learning.models import CompetencyCriteriaGroup, CompetencyRuleProfile, CompetencyTaxonomy
 from openedx_tagging.models import Tag
 
-from .utils import make_branch, make_competency_taxonomy, make_leaf_criterion, make_tag, usage_key
+from .utils import course_key_of, make_branch, make_competency_taxonomy, make_leaf_criterion, make_tag, usage_key
 
 pytestmark = pytest.mark.django_db
 
 # The name openedx-platform binds its own rule to, so it is spelled out here rather than imported.
 VIEW_COURSE_COMPETENCY_CRITERIA = "openedx_learning.view_course_competency_criteria"
 
-EMPTY_BODY = {"taxonomies": [], "tags": [], "groups": [], "criteria": []}
+EMPTY_BODY: dict[str, list[object]] = {"taxonomies": [], "tags": [], "groups": [], "criteria": []}
+# An urlconf that mounts only the learner routes, like an LMS.
+LMS_URLCONF = "tests.openedx_learning.applets.cbe.lms_urls"
 MALFORMED_KEY_BODY = {"course_key": ["The course run key is malformed."]}
-
-
-@pytest.fixture(name="lms_urlconf")
-def _lms_urlconf() -> type:
-    """A URLconf like an LMS's: only the learner routes, under the "api/" prefix the CMS mounts authoring at."""
-
-    class LmsUrlconf:
-        urlpatterns = [path("api/", include("openedx_learning.learner_urls"))]
-
-    return LmsUrlconf
 
 
 @pytest.fixture(name="user_client")
@@ -76,7 +68,7 @@ def test_a_caller_who_is_not_signed_in_is_rejected_with_no_competency_data(
     """AC1"""
     usage = make_course_with_criteria(course_x, tag, default_rule_profile)
 
-    response = api_client.get(criteria_url(course_x.course_key))
+    response = api_client.get(criteria_url(course_key_of(course_x)))
 
     assert response.status_code == status.HTTP_401_UNAUTHORIZED
     assert set(response.json()) == {"detail"}
@@ -89,7 +81,7 @@ def test_any_signed_in_user_can_read_the_criteria_under_the_default_permission(
     """AC2: a user who is not staff and has no enrollment in the course run still gets the full result."""
     usage = make_course_with_criteria(course_x, tag, default_rule_profile)
 
-    response = user_client.get(criteria_url(course_x.course_key))
+    response = user_client.get(criteria_url(course_key_of(course_x)))
 
     assert response.status_code == status.HTTP_200_OK
     assert [criterion["object_id"] for criterion in response.json()["criteria"]] == [usage]
@@ -104,7 +96,7 @@ def test_a_host_rule_that_refuses_gives_403_and_no_competency_data(
     usage = make_course_with_criteria(course_x, tag, default_rule_profile)
     rules.set_perm(VIEW_COURSE_COMPETENCY_CRITERIA, rules.always_deny)
 
-    response = user_client.get(criteria_url(course_x.course_key))
+    response = user_client.get(criteria_url(course_key_of(course_x)))
 
     assert response.status_code == status.HTTP_403_FORBIDDEN
     assert set(response.json()) == {"detail"}
@@ -122,8 +114,8 @@ def test_a_host_rule_that_decides_per_user_lets_one_caller_in_and_refuses_anothe
     enrolled_client.force_authenticate(user=enrolled_learner)
     rules.set_perm(VIEW_COURSE_COMPETENCY_CRITERIA, lambda user, _course_key: user == enrolled_learner)
 
-    assert enrolled_client.get(criteria_url(course_x.course_key)).status_code == status.HTTP_200_OK
-    assert user_client.get(criteria_url(course_x.course_key)).status_code == status.HTTP_403_FORBIDDEN
+    assert enrolled_client.get(criteria_url(course_key_of(course_x))).status_code == status.HTTP_200_OK
+    assert user_client.get(criteria_url(course_key_of(course_x))).status_code == status.HTTP_403_FORBIDDEN
 
 
 @pytest.mark.usefixtures("restore_permission_registry")
@@ -154,7 +146,7 @@ def test_a_refused_request_reads_no_competency_data(
     rules.set_perm(VIEW_COURSE_COMPETENCY_CRITERIA, rules.always_deny)
 
     with django_assert_num_queries(0):
-        response = user_client.get(criteria_url(course_x.course_key))
+        response = user_client.get(criteria_url(course_key_of(course_x)))
 
     assert response.status_code == status.HTTP_403_FORBIDDEN
 
@@ -174,7 +166,7 @@ def test_every_permitted_caller_gets_the_same_result(
     other_learner_client = APIClient()
     other_learner_client.force_authenticate(user=get_user_model().objects.create(username="other_learner"))
 
-    url = criteria_url(course_x.course_key)
+    url = criteria_url(course_key_of(course_x))
     bodies = [client.get(url).json() for client in (user_client, other_learner_client, staff_client)]
 
     assert bodies[0]["criteria"]
@@ -202,7 +194,7 @@ def test_a_course_run_in_the_catalog_without_criteria_returns_an_empty_body(
     user_client: APIClient, course_x: CourseRun,
 ) -> None:
     """AC9a"""
-    response = user_client.get(criteria_url(course_x.course_key))
+    response = user_client.get(criteria_url(course_key_of(course_x)))
 
     assert response.status_code == status.HTTP_200_OK
     assert response.json() == EMPTY_BODY
@@ -226,9 +218,9 @@ def test_a_course_key_with_a_raw_plus_resolves(
 ) -> None:
     """E1: a plus stays a plus in the path, where a query string would have turned it into a space."""
     usage = make_course_with_criteria(course_x, tag, default_rule_profile)
-    assert "+" in str(course_x.course_key)
+    assert "+" in str(course_key_of(course_x))
 
-    response = user_client.get(literal_path(str(course_x.course_key)))
+    response = user_client.get(literal_path(str(course_key_of(course_x))))
 
     assert response.status_code == status.HTTP_200_OK
     assert [criterion["object_id"] for criterion in response.json()["criteria"]] == [usage]
@@ -240,7 +232,7 @@ def test_a_course_key_with_an_encoded_plus_resolves_to_the_same_course_run(
     """E1: a client that percent-encodes the plus as %2B reaches the same course run."""
     usage = make_course_with_criteria(course_x, tag, default_rule_profile)
 
-    response = user_client.get(literal_path(str(course_x.course_key).replace("+", "%2B")))
+    response = user_client.get(literal_path(str(course_key_of(course_x)).replace("+", "%2B")))
 
     assert response.status_code == status.HTTP_200_OK
     assert [criterion["object_id"] for criterion in response.json()["criteria"]] == [usage]
@@ -388,7 +380,7 @@ def test_the_response_body_has_exactly_the_documented_shape(
     )
     (criterion,) = branch.criteria
 
-    response = user_client.get(criteria_url(course_x.course_key))
+    response = user_client.get(criteria_url(course_key_of(course_x)))
 
     assert response.status_code == status.HTTP_200_OK
     assert response.json() == {
@@ -440,7 +432,7 @@ def test_repeated_requests_list_everything_in_the_same_order(
     make_branch(make_tag(durable_skills, "Communication"), course_x, default_rule_profile, "comm_quiz", "comm_essay")
     make_branch(make_tag(competency_taxonomy, "Root Cause Analysis"), course_x, default_rule_profile, "rca_quiz")
     make_branch(make_tag(competency_taxonomy, "Triage"), course_x, default_rule_profile, "triage_quiz")
-    url = criteria_url(course_x.course_key)
+    url = criteria_url(course_key_of(course_x))
 
     first = user_client.get(url).json()
     second = user_client.get(url).json()
@@ -458,14 +450,14 @@ def test_repeated_requests_list_everything_in_the_same_order(
 @pytest.mark.parametrize("method", ["post", "put", "patch", "delete"])
 def test_methods_that_would_write_are_not_allowed(user_client: APIClient, course_x: CourseRun, method: str) -> None:
     """E18"""
-    response = getattr(user_client, method)(criteria_url(course_x.course_key))
+    response = getattr(user_client, method)(criteria_url(course_key_of(course_x)))
 
     assert response.status_code == status.HTTP_405_METHOD_NOT_ALLOWED
 
 
 def test_head_is_allowed(user_client: APIClient, course_x: CourseRun) -> None:
     """E18"""
-    response = user_client.head(criteria_url(course_x.course_key))
+    response = user_client.head(criteria_url(course_key_of(course_x)))
 
     assert response.status_code == status.HTTP_200_OK
 
@@ -482,9 +474,9 @@ def test_the_route_lives_under_the_cbe_v1_prefix_with_the_key_in_the_path() -> N
     )
 
 
-def test_the_learner_urls_resolve_the_learner_route(lms_urlconf: type) -> None:
+def test_the_learner_urls_resolve_the_learner_route() -> None:
     """AC7: what an LMS mounts does include the endpoint."""
-    match = resolve(literal_path("course-v1:Org1+Python100+Fall2026"), urlconf=lms_urlconf)
+    match = resolve(literal_path("course-v1:Org1+Python100+Fall2026"), urlconf=LMS_URLCONF)
 
     assert match.view_name == "cbe_learner:course-competency-criteria"
     assert match.kwargs == {"course_key": "course-v1:Org1+Python100+Fall2026"}
@@ -502,12 +494,12 @@ def test_the_learner_urls_resolve_the_learner_route(lms_urlconf: type) -> None:
         "/api/cbe/v1/criteria-groups/1/criteria/bulk-update/",
     ],
 )
-def test_the_learner_urls_serve_no_authoring_route(authoring_path: str, lms_urlconf: type) -> None:
+def test_the_learner_urls_serve_no_authoring_route(authoring_path: str) -> None:
     """AC7: an LMS that mounts only the learner URLs answers every authoring route with "no such route"."""
     resolve(authoring_path)  # The same path does exist where the authoring URLs are mounted.
 
     with pytest.raises(Resolver404):
-        resolve(authoring_path, urlconf=lms_urlconf)
+        resolve(authoring_path, urlconf=LMS_URLCONF)
 
 
 def test_the_authoring_routes_still_live_at_cbe_v1() -> None:
