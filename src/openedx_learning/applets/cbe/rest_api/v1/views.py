@@ -17,6 +17,7 @@ from rest_framework.exceptions import APIException, NotFound, PermissionDenied
 from rest_framework.exceptions import ValidationError as DRFValidationError
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
+from rest_framework.views import APIView
 from rest_framework.viewsets import GenericViewSet
 
 from openedx_tagging.models import Tag
@@ -32,10 +33,12 @@ from ...api import (
     get_blocked_courses,
     get_competency_criteria_tree,
     get_competency_rule_profiles,
+    get_course_competency_criteria,
     resolve_competency_tag,
     update_competency_criteria_group,
 )
 from ...models import CompetencyCriteriaGroup, CompetencyCriterion, CompetencyRuleProfile
+from ...rules import VIEW_COURSE_COMPETENCY_CRITERIA
 from ..paginators import CompetencyBlockedCoursesPagination, CompetencyRuleProfilePagination
 from .permissions import CompetencyReadPermission, CompetencyRuleProfilePermissions
 from .serializers import (
@@ -47,6 +50,8 @@ from .serializers import (
     CompetencyCriterionReadSerializer,
     CompetencyCriterionSerializer,
     CompetencyRuleProfileSerializer,
+    CourseCompetencyCriteriaSerializer,
+    parse_course_run_key,
 )
 
 
@@ -393,3 +398,31 @@ class CompetencyBlockedCoursesView(generics.GenericAPIView):
         rows = get_blocked_courses(tag, course_keys=query_params.validated_data.get("course_keys"))
         page = self.paginate_queryset(rows)
         return self.get_paginated_response(BlockedCourseSerializer(page, many=True).data)
+
+
+class CourseCompetencyCriteriaView(APIView):
+    """
+    GET-only. List a course run's competency criteria, with the competencies and groups they belong to.
+
+    ``GET api/cbe/v1/courses/<course_key>/competency-criteria/`` answers in this order: 401 for a caller
+    who is not signed in, 400 for a ``course_key`` that is not the plain key of a course run, 403 when the
+    ``openedx_learning.view_course_competency_criteria`` permission refuses that key, else 200. A
+    well-formed key the catalog does not know gives 200 with empty lists, never 404. Nothing is read from
+    the database before the permission check.
+
+    The default permission admits any signed-in user. A host that needs more, such as enrollment, rebinds
+    the permission with ``rules.set_perm``.
+
+    UNSTABLE: the criteria family is incomplete, so this response shape may change without a deprecation
+    cycle.
+    """
+
+    authentication_classes = (JwtAuthentication, SessionAuthenticationAllowInactiveUser)
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request, course_key: str) -> Response:
+        """Return the course run's criteria, if the caller may read them."""
+        parsed_key = parse_course_run_key(course_key)
+        if not request.user.has_perm(VIEW_COURSE_COMPETENCY_CRITERIA, parsed_key):
+            raise PermissionDenied
+        return Response(CourseCompetencyCriteriaSerializer(get_course_competency_criteria(parsed_key)).data)

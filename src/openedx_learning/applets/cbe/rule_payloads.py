@@ -4,22 +4,28 @@ the shape its rule_type defines. See :ref:`openedx-learning-adr-0002` Decision 3
 contract. ``RuleType`` declares exactly the rule types with a shape defined here, so a rule type
 can never be offered as a choice without also being saveable. These messages reach an API caller
 or admin form, so they must not leak internal class or function names. ``evaluate_rule()`` applies a
-validated payload to a learner's score fraction and returns whether the rule is met.
+validated payload to a learner's score fraction and returns whether the rule is met. ``effective_rule()`` picks
+the rule a criterion uses, from its rule profile or its own override.
 """
 from __future__ import annotations
 
 import operator
 from collections.abc import Callable
 from decimal import Decimal
-from typing import Literal, TypedDict
+from typing import TYPE_CHECKING, Any, Literal, TypedDict
 
 from django.core.exceptions import ValidationError
 from django.db import models
 from django.utils.translation import gettext_lazy as _
 
+if TYPE_CHECKING:
+    # Models import this module, so a runtime import here would be circular.
+    from .models import CompetencyCriterion
+
 __all__ = [
     "GradeRulePayload",
     "RuleType",
+    "effective_rule",
     "evaluate_rule",
     "validate_rule_payload",
 ]
@@ -140,3 +146,20 @@ def evaluate_rule(rule_type: str, payload: object, fraction: Decimal) -> bool:
     assert isinstance(payload, dict)
     threshold = Decimal(str(payload["value"]))
     return _GRADE_OPERATOR_FUNCS[payload["op"]](fraction, threshold)
+
+
+def effective_rule(criterion: CompetencyCriterion) -> tuple[str, Any]:
+    """
+    Return (rule_type, payload) for whichever of criterion's profile or override is set.
+
+    Load ``rule_profile`` with ``select_related`` when calling this for many criteria, or each call costs a query.
+    """
+    if criterion.rule_profile_id is not None:
+        # The oel_cbe_criterion_profile_xor_override_check constraint guarantees rule_profile is
+        # set whenever rule_profile_id is; this assertion only narrows that fact for mypy.
+        assert criterion.rule_profile is not None
+        return criterion.rule_profile.rule_type, criterion.rule_profile.rule_payload
+    # Same constraint, the other way around: rule_type_override is set whenever rule_profile_id
+    # is not.
+    assert criterion.rule_type_override is not None
+    return criterion.rule_type_override, criterion.rule_payload_override

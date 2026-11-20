@@ -25,6 +25,7 @@ from openedx_tagging.api import create_taxonomy, get_ancestor_tags, get_descenda
 from openedx_tagging.models import ObjectTag, Tag, Taxonomy
 from openedx_tagging.rules import ObjectTagPermissionItem, UserType
 
+from .course_criteria import get_course_competency_criteria
 from .data import CriterionDeletionResult, GradedObjectScore, GroupDeletionResult
 from .models import (
     CompetencyCourseRun,
@@ -38,7 +39,7 @@ from .models import (
     StudentCompetencyCriterionStatus,
 )
 from .rollup import roll_up_competency_statuses
-from .rule_payloads import evaluate_rule
+from .rule_payloads import effective_rule, evaluate_rule
 from .statuses import raise_status
 
 __all__ = [
@@ -58,6 +59,7 @@ __all__ = [
     "get_blocked_courses",
     "get_competency_criteria_tree",
     "get_competency_rule_profiles",
+    "get_course_competency_criteria",
     "get_courses_with_live_criteria",
     "is_competency_taxonomy",
     "record_graded_object_statuses",
@@ -911,19 +913,6 @@ def bulk_update_competency_criteria(
         return criteria
 
 
-def _effective_rule(criterion: CompetencyCriterion) -> tuple[str, Any]:
-    """Return (rule_type, payload) for whichever of criterion's profile or override is set."""
-    if criterion.rule_profile_id is not None:
-        # The oel_cbe_criterion_profile_xor_override_check constraint guarantees rule_profile is
-        # set whenever rule_profile_id is; this assertion only narrows that fact for mypy.
-        assert criterion.rule_profile is not None
-        return criterion.rule_profile.rule_type, criterion.rule_profile.rule_payload
-    # Same constraint, the other way around: rule_type_override is set whenever rule_profile_id
-    # is not.
-    assert criterion.rule_type_override is not None
-    return criterion.rule_type_override, criterion.rule_payload_override
-
-
 def record_graded_object_statuses(*, user_id: int, scores: Sequence[GradedObjectScore]) -> int:
     """
     Record a learner's leaf-level competency status for each graded object in ``scores``.
@@ -974,7 +963,7 @@ def record_graded_object_statuses(*, user_id: int, scores: Sequence[GradedObject
     changed = 0
     for criterion in criteria:
         fraction = fraction_by_object_id[criterion.object_tag.object_id]
-        rule_type, payload = _effective_rule(criterion)
+        rule_type, payload = effective_rule(criterion)
         try:
             demonstrated = evaluate_rule(rule_type, payload, fraction)
         except ValidationError as exc:

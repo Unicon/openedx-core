@@ -13,8 +13,13 @@ from openedx_tagging.rules import UserType
 from .models import CompetencyRuleProfile
 
 __all__ = [
+    "VIEW_COURSE_COMPETENCY_CRITERIA",
     "can_view_competency_rule_profile",
 ]
+
+# Checked with the course key, as ``user.has_perm(VIEW_COURSE_COMPETENCY_CRITERIA, course_key)``.
+# openedx-platform binds its own rule to this name, so the name is part of this library's contract.
+VIEW_COURSE_COMPETENCY_CRITERIA = "openedx_learning.view_course_competency_criteria"
 
 
 @rules.predicate
@@ -56,3 +61,9 @@ rules.add_perm(
     "openedx_learning.view_competencyruleprofile",
     rules.is_authenticated & can_view_competency_rule_profile,
 )
+
+# Registered only when the name is free, so the host's rule wins whichever module loads first. Loaded
+# first, this default is replaced by the host's later ``rules.set_perm``. Loaded second, a plain
+# ``add_perm`` would raise ``KeyError`` and ``set_perm`` would undo the host's rule.
+if not rules.perm_exists(VIEW_COURSE_COMPETENCY_CRITERIA):
+    rules.add_perm(VIEW_COURSE_COMPETENCY_CRITERIA, rules.is_authenticated)

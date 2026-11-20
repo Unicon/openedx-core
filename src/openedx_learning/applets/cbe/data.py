@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from decimal import Decimal
+from typing import Any
 
 
 @dataclass(frozen=True, kw_only=True, slots=True)
@@ -68,3 +69,84 @@ class GroupDeletionResult:
     archived: bool
     cascaded_group_count: int
     cascaded_criteria_count: int
+
+
+@dataclass(frozen=True, kw_only=True, slots=True)
+class TagLineageEntry:
+    """One tag on the path from the top of a taxonomy down to a competency."""
+
+    id: int
+    value: str
+
+
+@dataclass(frozen=True, kw_only=True, slots=True)
+class CompetencyTaxonomyData:
+    """A competency taxonomy that holds at least one competency with criteria in the course run."""
+
+    id: int
+    name: str
+
+
+@dataclass(frozen=True, kw_only=True, slots=True)
+class CompetencyTagData:
+    """
+    A competency: a tag of a competency taxonomy.
+
+    ``lineage`` runs from the top of the taxonomy down to the competency itself, which is its last entry.
+    """
+
+    id: int
+    taxonomy_id: int
+    value: str
+    external_id: str | None
+    lineage: tuple[TagLineageEntry, ...]
+
+
+@dataclass(frozen=True, kw_only=True, slots=True)
+class CriteriaGroupData:
+    """
+    A criteria group. A root group has no ``parent_id``; every group names its competency through ``tag_id``.
+
+    ``logic_operator`` is ``"AND"``, ``"OR"`` or ``None``, which means ``OR`` for a group with a single child.
+    """
+
+    id: int
+    parent_id: int | None
+    tag_id: int
+    name: str
+    ordering: int
+    logic_operator: str | None
+
+
+@dataclass(frozen=True, kw_only=True, slots=True)
+class CriterionData:
+    """
+    A criterion: the rule a learner must meet on one object, such as a graded subsection, to count towards a group.
+
+    ``rule_type`` and ``rule_payload`` are the effective rule, whether it comes from the criterion's rule
+    profile or from its own override, with the payload exactly as stored.
+    """
+
+    id: int
+    group_id: int
+    object_id: str
+    rule_type: str
+    rule_payload: Any
+
+
+@dataclass(frozen=True, kw_only=True, slots=True)
+class CourseCompetencyCriteria:
+    """
+    Everything the learner-facing criteria read returns for one course run.
+
+    Each collection is a tuple. Every id a group, tag or criterion refers to belongs to an entry of the
+    matching collection here, so the taxonomy, competency, group and criterion nesting can be rebuilt from
+    this object alone.
+
+    UNSTABLE: this shape may change without a deprecation cycle.
+    """
+
+    taxonomies: tuple[CompetencyTaxonomyData, ...]
+    tags: tuple[CompetencyTagData, ...]
+    groups: tuple[CriteriaGroupData, ...]
+    criteria: tuple[CriterionData, ...]

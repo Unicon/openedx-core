@@ -175,6 +175,31 @@ class CompetencyCriteriaGroupUpdateSerializer(serializers.Serializer):  # pylint
         return attrs
 
 
+# The length of the catalog's course_key column, which no stored key can exceed.
+MAX_COURSE_RUN_KEY_LENGTH = 255
+
+
+def parse_course_run_key(value: str) -> CourseLocator:
+    """
+    Parse ``value`` into the plain course key of a course run.
+
+    Raises a ``ValidationError`` for the ``course_key`` field with fixed text, so a response never echoes
+    the input, when ``value`` is longer than a stored key can be, does not parse, is not a course key
+    (library keys included), or carries a branch or a version, since the catalog stores plain keys only.
+    The length is checked first so that an oversized value is never handed to the parser.
+    """
+    malformed = serializers.ValidationError({"course_key": [_("The course run key is malformed.")]})
+    if len(value) > MAX_COURSE_RUN_KEY_LENGTH:
+        raise malformed
+    try:
+        key = CourseKey.from_string(value)
+    except InvalidKeyError as exc:
+        raise malformed from exc
+    if not isinstance(key, CourseLocator) or key.branch is not None or key.version_guid is not None:
+        raise malformed
+    return key
+
+
 MAX_COURSE_KEYS = 100
 
 
@@ -267,3 +292,82 @@ class BlockedCourseSerializer(serializers.Serializer):
     def update(self, instance, validated_data):
         """Not supported: this serializer is read-only."""
         raise NotImplementedError
+
+
+class _ReadOnlySerializer(serializers.Serializer):
+    """
+    Base for serializers that only turn value objects into JSON and never save anything.
+
+    ``create`` and ``update`` raise ``TypeError`` rather than ``NotImplementedError`` so that pylint does not
+    count them as abstract and ask every subclass to override them.
+    """
+
+    def create(self, validated_data):
+        """Refuse: this serializer is read-only."""
+        raise TypeError("This serializer is read-only.")
+
+    def update(self, instance, validated_data):
+        """Refuse: this serializer is read-only."""
+        raise TypeError("This serializer is read-only.")
+
+
+class TagLineageEntrySerializer(_ReadOnlySerializer):
+    """Read-only representation of a ``TagLineageEntry``."""
+
+    id = serializers.IntegerField(read_only=True)
+    value = serializers.CharField(read_only=True)
+
+
+class CompetencyTaxonomyDataSerializer(_ReadOnlySerializer):
+    """Read-only representation of a ``CompetencyTaxonomyData``."""
+
+    id = serializers.IntegerField(read_only=True)
+    name = serializers.CharField(read_only=True)
+
+
+class CompetencyTagDataSerializer(_ReadOnlySerializer):
+    """Read-only representation of a ``CompetencyTagData``."""
+
+    id = serializers.IntegerField(read_only=True)
+    taxonomy_id = serializers.IntegerField(read_only=True)
+    value = serializers.CharField(read_only=True)
+    external_id = serializers.CharField(read_only=True)
+    lineage = TagLineageEntrySerializer(many=True, read_only=True)
+
+
+class CriteriaGroupDataSerializer(_ReadOnlySerializer):
+    """Read-only representation of a ``CriteriaGroupData``."""
+
+    id = serializers.IntegerField(read_only=True)
+    parent_id = serializers.IntegerField(read_only=True)
+    tag_id = serializers.IntegerField(read_only=True)
+    name = serializers.CharField(read_only=True)
+    ordering = serializers.IntegerField(read_only=True)
+    logic_operator = serializers.CharField(read_only=True)
+
+
+class CriterionDataSerializer(_ReadOnlySerializer):
+    """Read-only representation of a ``CriterionData``; ``rule_payload`` is emitted as stored."""
+
+    id = serializers.IntegerField(read_only=True)
+    group_id = serializers.IntegerField(read_only=True)
+    object_id = serializers.CharField(read_only=True)
+    rule_type = serializers.CharField(read_only=True)
+    rule_payload = serializers.JSONField(read_only=True)
+
+
+class CourseCompetencyCriteriaSerializer(_ReadOnlySerializer):
+    """
+    Read-only representation of a ``CourseCompetencyCriteria``, the body of the learner criteria endpoint.
+
+    UNSTABLE: the criteria family is incomplete, so this shape may change without a deprecation cycle.
+
+    Each reference field is named after the array it points into: ``parent_id`` and ``group_id`` into
+    ``groups``, ``tag_id`` into ``tags`` and ``taxonomy_id`` into ``taxonomies``. Authoring-side columns,
+    such as the rule profile id, the override columns and the object tag id, are left out on purpose.
+    """
+
+    taxonomies = CompetencyTaxonomyDataSerializer(many=True, read_only=True)
+    tags = CompetencyTagDataSerializer(many=True, read_only=True)
+    groups = CriteriaGroupDataSerializer(many=True, read_only=True)
+    criteria = CriterionDataSerializer(many=True, read_only=True)

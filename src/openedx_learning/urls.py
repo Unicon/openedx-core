@@ -1,5 +1,5 @@
 """
-Learning API URLs.
+Learning API URLs, for the authoring routes a CMS serves. The learner routes are in ``learner_urls``.
 
 Maps each applet onto its own URL segment. A consuming project includes this module and never an
 applet package directly, so ``applets/`` stays the internal layout detail that api.py and
