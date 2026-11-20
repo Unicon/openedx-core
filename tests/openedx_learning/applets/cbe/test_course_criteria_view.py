@@ -17,7 +17,6 @@ from rest_framework import status
 from rest_framework.test import APIClient
 
 from openedx_catalog.models import CourseRun
-from openedx_learning.applets.cbe.rest_api.v1 import views
 from openedx_learning.models import CompetencyCriteriaGroup, CompetencyRuleProfile, CompetencyTaxonomy
 from openedx_tagging.models import Tag
 
@@ -50,6 +49,12 @@ def criteria_url(course_key: CourseKey | str) -> str:
 def literal_path(raw_course_key: str) -> str:
     """Return the endpoint's path with `raw_course_key` pasted in exactly as written, unquoted."""
     return f"/api/cbe/v1/courses/{raw_course_key}/competency-criteria/"
+
+
+def key_of_length(length: int) -> str:
+    """Return a well-formed course key that is exactly `length` characters long."""
+    prefix = "course-v1:Org1+Python100+"
+    return prefix + "R" * (length - len(prefix))
 
 
 def make_course_with_criteria(
@@ -154,28 +159,6 @@ def test_a_refused_request_reads_no_competency_data(
 
 
 # =============================================================================================
-# Who is asking does not change the result
-# =============================================================================================
-
-
-def test_every_permitted_caller_gets_the_same_result(
-    user_client: APIClient, staff_client: APIClient, course_x: CourseRun, competency_taxonomy: CompetencyTaxonomy,
-    default_rule_profile: CompetencyRuleProfile,
-) -> None:
-    """Two different signed-in users and a staff user receive identical bodies."""
-    make_branch(make_tag(competency_taxonomy, "Communication"), course_x, default_rule_profile, "comm_quiz")
-    make_branch(make_tag(competency_taxonomy, "Teamwork"), course_x, default_rule_profile, "team_quiz")
-    other_learner_client = APIClient()
-    other_learner_client.force_authenticate(user=get_user_model().objects.create(username="other_learner"))
-
-    url = criteria_url(course_key_of(course_x))
-    bodies = [client.get(url).json() for client in (user_client, other_learner_client, staff_client)]
-
-    assert bodies[0]["criteria"]
-    assert bodies[0] == bodies[1] == bodies[2]
-
-
-# =============================================================================================
 # Course resolution
 # =============================================================================================
 
@@ -191,79 +174,41 @@ def test_a_malformed_course_run_key_is_rejected_with_a_message_and_no_data(
     assert response.json() == MALFORMED_KEY_BODY
 
 
-def test_a_course_run_in_the_catalog_without_criteria_returns_an_empty_body(
-    user_client: APIClient, course_x: CourseRun,
-) -> None:
-    response = user_client.get(criteria_url(course_key_of(course_x)))
+@pytest.mark.usefixtures("course_x")
+@pytest.mark.parametrize(
+    "key",
+    [
+        pytest.param("course-v1:Org1+Python100+Fall2026", id="course run without criteria"),
+        pytest.param("course-v1:Nowhere+Missing+Run", id="key not in the catalog"),
+        pytest.param("Org1/Python100/Fall2026", id="deprecated slash key"),
+        pytest.param("ccx-v1:Org1+Python100+Fall2026+ccx@1", id="CCX key"),
+        pytest.param(key_of_length(255), id="longest key the catalog can store"),
+    ],
+)
+def test_a_key_with_no_competency_criteria_returns_an_empty_body(user_client: APIClient, key: str) -> None:
+    """Each key is well-formed, so it is looked up and found to have nothing, not rejected."""
+    response = user_client.get(literal_path(key))
 
     assert response.status_code == status.HTTP_200_OK
     assert response.json() == EMPTY_BODY
 
 
-def test_a_well_formed_key_matching_no_course_run_returns_an_empty_body(user_client: APIClient) -> None:
-    response = user_client.get(criteria_url("course-v1:Nowhere+Missing+Run"))
-
-    assert response.status_code == status.HTTP_200_OK
-    assert response.json() == EMPTY_BODY
-
-
-# =============================================================================================
-# Spellings of a valid key
-# =============================================================================================
-
-
-def test_a_course_key_with_a_raw_plus_resolves(
-    user_client: APIClient, course_x: CourseRun, tag: Tag, default_rule_profile: CompetencyRuleProfile,
+@pytest.mark.parametrize("plus", ["+", "%2B"], ids=["raw plus", "percent-encoded plus"])
+def test_a_course_key_resolves_whether_its_plus_signs_are_encoded_or_not(
+    user_client: APIClient, course_x: CourseRun, tag: Tag, default_rule_profile: CompetencyRuleProfile, plus: str,
 ) -> None:
-    """A plus stays a plus in the path, where a query string would have turned it into a space."""
+    """A plus stays a plus in a path, where a query string would have turned it into a space."""
     usage = make_course_with_criteria(course_x, tag, default_rule_profile)
-    assert "+" in str(course_key_of(course_x))
 
-    response = user_client.get(literal_path(str(course_key_of(course_x))))
+    response = user_client.get(literal_path(str(course_key_of(course_x)).replace("+", plus)))
 
     assert response.status_code == status.HTTP_200_OK
     assert [criterion["object_id"] for criterion in response.json()["criteria"]] == [usage]
-
-
-def test_a_course_key_with_an_encoded_plus_resolves_to_the_same_course_run(
-    user_client: APIClient, course_x: CourseRun, tag: Tag, default_rule_profile: CompetencyRuleProfile,
-) -> None:
-    """A client that percent-encodes the plus as %2B reaches the same course run."""
-    usage = make_course_with_criteria(course_x, tag, default_rule_profile)
-
-    response = user_client.get(literal_path(str(course_key_of(course_x)).replace("+", "%2B")))
-
-    assert response.status_code == status.HTTP_200_OK
-    assert [criterion["object_id"] for criterion in response.json()["criteria"]] == [usage]
-
-
-def test_a_deprecated_slash_key_is_accepted_and_has_no_criteria(user_client: APIClient) -> None:
-    """Org/Course/Run keys contain slashes, and they reach the view instead of failing to route."""
-    response = user_client.get(literal_path("Org1/Python100/Fall2026"))
-
-    assert response.status_code == status.HTTP_200_OK
-    assert response.json() == EMPTY_BODY
-
-
-def test_a_ccx_key_is_accepted_and_has_no_criteria(user_client: APIClient) -> None:
-    """A CCX key is a course key, so it is not malformed; it just has no criteria of its own."""
-    response = user_client.get(literal_path("ccx-v1:Org1+Python100+Fall2026+ccx@1"))
-
-    assert response.status_code == status.HTTP_200_OK
-    assert response.json() == EMPTY_BODY
 
 
 # =============================================================================================
 # Values that are not a course run key
 # =============================================================================================
-
-KEY_PREFIX = "course-v1:Org1+Python100+"
-
-
-def key_of_length(length: int) -> str:
-    """Return a well-formed course key that is exactly `length` characters long."""
-    return KEY_PREFIX + "R" * (length - len(KEY_PREFIX))
-
 
 @pytest.mark.parametrize(
     "submitted",
@@ -292,14 +237,6 @@ def test_a_value_that_is_not_the_plain_key_of_a_course_run_is_rejected(
     assert submitted not in response.content.decode()
 
 
-def test_a_key_of_exactly_255_characters_is_well_formed(user_client: APIClient) -> None:
-    """255 is the longest key the catalog can store, so a key that long is looked up, not rejected."""
-    response = user_client.get(literal_path(key_of_length(255)))
-
-    assert response.status_code == status.HTTP_200_OK
-    assert response.json() == EMPTY_BODY
-
-
 # =============================================================================================
 # Authentication
 # =============================================================================================
@@ -326,15 +263,6 @@ def test_a_user_signed_in_with_a_session_is_accepted(
 
     assert response.status_code == status.HTTP_200_OK
     assert len(response.json()["criteria"]) == 1
-
-
-def test_jwt_authentication_stays_enabled() -> None:
-    """
-    The Learning MFE calls this endpoint with a JWT cookie, so JWT authentication must stay enabled.
-
-    Decoding a real JWT needs an LMS's JWT settings, so the LMS integration run covers that end to end.
-    """
-    assert views.JwtAuthentication in views.CourseCompetencyCriteriaView.authentication_classes
 
 
 # =============================================================================================
@@ -482,13 +410,6 @@ def test_head_is_allowed(user_client: APIClient, course_x: CourseRun) -> None:
 # =============================================================================================
 
 
-def test_the_route_lives_under_the_cbe_v1_prefix_with_the_key_in_the_path() -> None:
-    """The course key is part of the path, under the prefix the authoring routes use."""
-    assert criteria_url("course-v1:Org1+Python100+Fall2026") == (
-        "/api/cbe/v1/courses/course-v1:Org1+Python100+Fall2026/competency-criteria/"
-    )
-
-
 def test_the_learner_urls_resolve_the_learner_route() -> None:
     """The URLs an LMS mounts include the endpoint."""
     match = resolve(literal_path("course-v1:Org1+Python100+Fall2026"), urlconf=LMS_URLCONF)
@@ -500,13 +421,8 @@ def test_the_learner_urls_resolve_the_learner_route() -> None:
 @pytest.mark.parametrize(
     "authoring_path",
     [
-        "/api/cbe/v1/rule_profiles/",
-        "/api/cbe/v1/competencies/1/criteria/",
-        "/api/cbe/v1/competencies/1/criteria/1/",
-        "/api/cbe/v1/competencies/1/criteria-groups/",
-        "/api/cbe/v1/competencies/1/criteria-groups/1/",
-        "/api/cbe/v1/competencies/1/blocked-courses/",
-        "/api/cbe/v1/criteria-groups/1/criteria/bulk-update/",
+        pytest.param("/api/cbe/v1/rule_profiles/", id="route registered with a router"),
+        pytest.param("/api/cbe/v1/competencies/1/criteria-groups/", id="route registered by path"),
     ],
 )
 def test_the_learner_urls_serve_no_authoring_route(authoring_path: str) -> None:

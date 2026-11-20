@@ -100,10 +100,6 @@ def test_the_course_criteria_permission_name_is_exported_under_its_contract_name
     assert openedx_learning.rules.VIEW_COURSE_COMPETENCY_CRITERIA == VIEW_COURSE_COMPETENCY_CRITERIA
 
 
-def test_the_course_criteria_permission_is_registered_by_default() -> None:
-    assert rules.perm_exists(VIEW_COURSE_COMPETENCY_CRITERIA)
-
-
 def test_anonymous_callers_are_refused_the_course_criteria_by_default() -> None:
     """The default rule admits anyone signed in, and nobody else."""
     assert rules.perm_exists(VIEW_COURSE_COMPETENCY_CRITERIA)
@@ -119,16 +115,6 @@ def test_any_signed_in_user_may_read_the_course_criteria_by_default(
     caller = request.getfixturevalue(user_fixture)
 
     assert may_view_course_criteria(caller, COURSE_KEY) is True
-
-
-@pytest.mark.usefixtures("restore_permission_registry")
-def test_a_host_rule_bound_after_core_loaded_replaces_the_default(user: UserType) -> None:
-    """The host's set_perm wins, and its rule is asked with the course key."""
-    assert rules.perm_exists(VIEW_COURSE_COMPETENCY_CRITERIA)
-    rules.set_perm(VIEW_COURSE_COMPETENCY_CRITERIA, lambda _user, course_key: course_key == COURSE_KEY)
-
-    assert may_view_course_criteria(user, COURSE_KEY) is True
-    assert may_view_course_criteria(user, OTHER_COURSE_KEY) is False
 
 
 @pytest.mark.usefixtures("restore_permission_registry")

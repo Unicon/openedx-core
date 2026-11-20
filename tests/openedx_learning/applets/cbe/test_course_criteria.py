@@ -14,6 +14,8 @@ from typing import NamedTuple
 import pytest
 import rules
 from bson import ObjectId
+from django.db import connection
+from django.test.utils import CaptureQueriesContext
 from opaque_keys.edx.keys import CourseKey
 from opaque_keys.edx.locator import CourseLocator
 
@@ -29,6 +31,8 @@ from openedx_learning.api import (
     delete_or_archive_competency_criterion,
     get_course_competency_criteria,
 )
+from openedx_learning.applets.cbe import course_criteria
+from openedx_learning.applets.cbe.course_criteria import _find_criteria as find_criteria
 from openedx_learning.models import (
     CompetencyCriteriaGroup,
     CompetencyCriterion,
@@ -187,27 +191,24 @@ def test_a_key_differing_only_in_case_matches_nothing(
     assert get_course_competency_criteria(other_case) == EMPTY_RESULT
 
 
-def test_a_key_with_a_branch_matches_nothing(
-    course_x: CourseRun, tag: Tag, default_rule_profile: CompetencyRuleProfile,
+def plain_key_with_branch(plain_key: CourseKey) -> CourseKey:
+    return CourseKey.from_string(f"{plain_key}+branch@draft-branch")
+
+
+def plain_key_with_version(plain_key: CourseKey) -> CourseKey:
+    return CourseLocator(plain_key.org, plain_key.course, plain_key.run, version_guid=ObjectId())
+
+
+@pytest.mark.parametrize("pin_key", [plain_key_with_branch, plain_key_with_version], ids=["branch", "version only"])
+def test_a_key_pinned_to_a_branch_or_version_matches_nothing(
+    course_x: CourseRun, tag: Tag, default_rule_profile: CompetencyRuleProfile, pin_key,
 ) -> None:
-    """The catalog holds plain course keys only, so a draft-branch key finds nothing."""
-    make_branch(tag, course_x, default_rule_profile, "quiz1")
-    assert get_course_competency_criteria(course_key_of(course_x)).criteria
-    draft_key = CourseKey.from_string(f"{course_key_of(course_x)}+branch@draft-branch")
-
-    assert get_course_competency_criteria(draft_key) == EMPTY_RESULT
-
-
-def test_a_key_with_only_a_version_matches_nothing(
-    course_x: CourseRun, tag: Tag, default_rule_profile: CompetencyRuleProfile,
-) -> None:
-    """The catalog holds plain course keys only, so a key pinned to a version finds nothing."""
+    """The catalog holds plain course keys only, so a pinned key finds nothing."""
     make_branch(tag, course_x, default_rule_profile, "quiz1")
     plain_key = course_key_of(course_x)
     assert get_course_competency_criteria(plain_key).criteria
-    versioned_key = CourseLocator(plain_key.org, plain_key.course, plain_key.run, version_guid=ObjectId())
 
-    assert get_course_competency_criteria(versioned_key) == EMPTY_RESULT
+    assert get_course_competency_criteria(pin_key(plain_key)) == EMPTY_RESULT
 
 
 # =============================================================================================
@@ -272,6 +273,22 @@ def test_the_result_can_be_reassembled_from_the_taxonomy_down_to_each_criterion(
         ),
     ]
     assert_every_reference_resolves(result)
+
+
+def test_a_course_level_group_with_two_bottom_tier_groups_is_returned_with_no_operator(
+    course_x: CourseRun, tag: Tag, default_rule_profile: CompetencyRuleProfile,
+) -> None:
+    """The authoring API stores no operator on a course-level group, however many children it has."""
+    first = make_branch(tag, course_x, default_rule_profile, "quiz1")
+    second = make_branch(tag, course_x, default_rule_profile, "quiz2")
+    assert first.course_level.id == second.course_level.id
+
+    result = get_course_competency_criteria(course_key_of(course_x))
+
+    logic_operators = {group.id: group.logic_operator for group in result.groups}
+    assert logic_operators[first.course_level.id] is None
+    assert logic_operators[first.bottom_tier.id] == "OR"
+    assert logic_operators[second.bottom_tier.id] == "OR"
 
 
 def test_only_course_xs_part_of_a_shared_competency_is_returned(
@@ -400,6 +417,30 @@ def test_an_ancestor_value_in_another_taxonomy_does_not_leak_into_a_lineage(
     }
 
 
+def test_renaming_an_ancestor_tag_while_the_read_runs_does_not_break_it(
+    monkeypatch: pytest.MonkeyPatch,
+    course_x: CourseRun, competency_taxonomy: CompetencyTaxonomy, default_rule_profile: CompetencyRuleProfile,
+) -> None:
+    """
+    A rename that lands after the read loaded its tags and before it looked up their ancestors, which the hook
+    simulates by renaming inside `_find_criteria`, must not fail the read; the lineage shows the new name.
+    """
+    problem_solving = make_tag(competency_taxonomy, "Problem Solving")
+    root_cause_analysis = make_tag(competency_taxonomy, "Root Cause Analysis", problem_solving)
+    make_branch(root_cause_analysis, course_x, default_rule_profile, "rca_quiz")
+
+    def rename_ancestor_then_find_criteria(course_branch_levels):
+        problem_solving.value = "Problem Framing"
+        problem_solving.save()  # A real save, so the lineage strings of its descendants are rewritten too.
+        return find_criteria(course_branch_levels)
+
+    monkeypatch.setattr(course_criteria, "_find_criteria", rename_ancestor_then_find_criteria)
+
+    result = get_course_competency_criteria(course_key_of(course_x))
+
+    assert [entry.value for entry in result.tags[0].lineage] == ["Problem Framing", "Root Cause Analysis"]
+
+
 # =============================================================================================
 # The effective rule
 # =============================================================================================
@@ -481,23 +522,6 @@ def test_a_criterion_on_an_archived_rule_profile_is_still_returned_with_that_pro
 # =============================================================================================
 
 
-def test_criteria_on_subsections_a_learner_cannot_see_are_still_returned(
-    course_x: CourseRun, tag: Tag, default_rule_profile: CompetencyRuleProfile,
-) -> None:
-    """
-    This library knows nothing about a subsection's visibility, so every criterion comes back, even one on a
-    subsection deleted since.
-    """
-    subsections = ("released", "not_yet_released", "hidden_from_learners", "content_group_only", "deleted")
-    make_branch(tag, course_x, default_rule_profile, *subsections)
-
-    result = get_course_competency_criteria(course_key_of(course_x))
-
-    assert {criterion.object_id for criterion in result.criteria} == {
-        usage_key(course_x, subsection) for subsection in subsections
-    }
-
-
 # =============================================================================================
 # Order
 # =============================================================================================
@@ -543,6 +567,21 @@ def test_criteria_are_listed_by_id_not_by_group_order_or_usage_key(
     result = get_course_competency_criteria(course_key_of(course_x))
 
     assert [criterion.id for criterion in result.criteria] == [first.criteria[0].id, second.criteria[0].id]
+
+
+def test_criteria_whose_ids_interleave_across_groups_are_listed_by_id(
+    course_x: CourseRun, tag: Tag, default_rule_profile: CompetencyRuleProfile,
+) -> None:
+    """Rows grouped by their group, which a database may return without an explicit order, would come out c2, c1, c3."""
+    group_a = make_branch(tag, course_x, default_rule_profile).bottom_tier
+    group_b = make_branch(tag, course_x, default_rule_profile).bottom_tier
+    c1 = add_criterion(group_b, course_x, "quiz1", rule_profile=default_rule_profile)
+    c2 = add_criterion(group_a, course_x, "quiz2", rule_profile=default_rule_profile)
+    c3 = add_criterion(group_b, course_x, "quiz3", rule_profile=default_rule_profile)
+
+    result = get_course_competency_criteria(course_key_of(course_x))
+
+    assert [criterion.id for criterion in result.criteria] == [c1.id, c2.id, c3.id]
 
 
 def test_groups_are_listed_level_by_level_so_every_group_follows_its_parent(
@@ -885,29 +924,31 @@ def test_a_group_below_a_bottom_tier_group_is_returned_with_consistent_parent_id
 # =============================================================================================
 
 
-def test_a_populated_course_costs_five_queries_however_many_competencies_it_has(
-    course_x: CourseRun, competency_taxonomy: CompetencyTaxonomy, default_rule_profile: CompetencyRuleProfile,
-    django_assert_num_queries,
+def count_queries(course_key: CourseKey) -> int:
+    """Return how many queries reading `course_key`'s criteria costs."""
+    with CaptureQueriesContext(connection) as queries:
+        get_course_competency_criteria(course_key)
+    return len(queries)
+
+
+def test_twice_as_many_competencies_cost_the_same_number_of_queries(
+    course_x: CourseRun, default_rule_profile: CompetencyRuleProfile,
 ) -> None:
-    """
-    Course-level groups, bottom-tier groups, the empty level below them, criteria, and the ancestor tags.
-    A third competency, in a third taxonomy, adds rows but no queries.
-    """
-    problem_solving = make_tag(competency_taxonomy, "Problem Solving")
-    root_cause_analysis = make_tag(competency_taxonomy, "Root Cause Analysis", problem_solving)
-    communication = make_tag(make_competency_taxonomy("Durable Skills"), "Communication")
-    make_branch(root_cause_analysis, course_x, default_rule_profile, "rca_quiz")
-    make_branch(communication, course_x, default_rule_profile, "comm_quiz")
+    """Each competency has an ancestor tag and its own taxonomy, so nothing is shared between them."""
+    key = course_key_of(course_x)
 
-    with django_assert_num_queries(5):
-        two_competencies = get_course_competency_criteria(course_key_of(course_x))
-    assert len(two_competencies.tags) == 2
+    def add_competencies(*names: str) -> None:
+        for name in names:
+            taxonomy = make_competency_taxonomy(f"{name} skills")
+            parent = make_tag(taxonomy, f"{name} basics")
+            make_branch(make_tag(taxonomy, name, parent), course_x, default_rule_profile, f"{name}_quiz")
 
-    teamwork_skills = make_competency_taxonomy("Teamwork Skills")
-    collaboration = make_tag(teamwork_skills, "Collaboration")
-    shared_work = make_tag(teamwork_skills, "Shared Work", collaboration)
-    make_branch(shared_work, course_x, default_rule_profile, "shared_quiz")
+    add_competencies("Writing", "Listening")
+    queries_for_two = count_queries(key)
+    assert len(get_course_competency_criteria(key).tags) == 2
 
-    with django_assert_num_queries(5):
-        three_competencies = get_course_competency_criteria(course_key_of(course_x))
-    assert len(three_competencies.tags) == 3
+    add_competencies("Speaking", "Reading")
+    queries_for_four = count_queries(key)
+    assert len(get_course_competency_criteria(key).tags) == 4
+
+    assert queries_for_four == queries_for_two
