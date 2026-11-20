@@ -411,10 +411,9 @@ class CourseCompetencyCriteriaView(APIView):
     well-formed key the catalog does not know gives 200 with empty lists, never 404. This view reads nothing
     before the permission check, though authentication and the host's rule may query.
 
-    The default permission admits any signed-in user. A host that needs more, such as enrollment, rebinds
-    the permission with ``rules.set_perm``.
+    The default permission admits any signed-in user; the applet README says how a host rebinds it.
 
-    UNSTABLE: the criteria family is incomplete, so this response shape may change without a deprecation
+    UNSTABLE: the CBE criteria APIs are incomplete, so this response shape may change without a deprecation
     cycle.
     """
 

@@ -107,7 +107,7 @@ class CriteriaGroupData:
     """
     A criteria group. A root group has no ``parent_id``; every group names its competency through ``tag_id``.
 
-    ``logic_operator`` is ``"AND"``, ``"OR"`` or ``None``, which means ``OR`` for a group with a single child.
+    ``logic_operator`` is ``"AND"``, ``"OR"`` or ``None``, which is for a single-child group only and reads as ``OR``.
     """
 
     id: int

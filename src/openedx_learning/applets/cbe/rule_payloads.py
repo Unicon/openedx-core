@@ -4,8 +4,8 @@ the shape its rule_type defines. See :ref:`openedx-learning-adr-0002` Decision 3
 contract. ``RuleType`` declares exactly the rule types with a shape defined here, so a rule type
 can never be offered as a choice without also being saveable. These messages reach an API caller
 or admin form, so they must not leak internal class or function names. ``evaluate_rule()`` applies a
-validated payload to a learner's score fraction and returns whether the rule is met. ``effective_rule()`` picks
-the rule a criterion uses, from its rule profile or its own override.
+validated payload to a learner's score fraction and returns whether the rule is met.
+``effective_rule()`` picks the rule a criterion uses, from its rule profile or its own override.
 """
 from __future__ import annotations
 

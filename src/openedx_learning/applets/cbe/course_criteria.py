@@ -41,7 +41,7 @@ def get_course_competency_criteria(course_key: CourseKey) -> CourseCompetencyCri
     Return the competency criteria of the course run ``course_key``, with the groups, competencies and
     taxonomies needed to place each criterion.
 
-    UNSTABLE: the criteria family is incomplete, so this function and its result may change without a
+    UNSTABLE: the CBE criteria APIs are incomplete, so this function and its result may change without a
     deprecation cycle.
 
     This performs no authorization. The caller must first check that its user may read the course run,
@@ -87,7 +87,7 @@ def get_course_competency_criteria(course_key: CourseKey) -> CourseCompetencyCri
 
 
 def _carries_branch_or_version(course_key: CourseKey) -> bool:
-    """Say whether ``course_key`` is more than a plain run key, which the ``course_key`` column would ignore."""
+    """Say whether ``course_key`` has a branch or a version, which the ``course_key`` field strips when comparing."""
     return isinstance(course_key, CourseLocator) and (
         course_key.branch is not None or course_key.version_guid is not None
     )
@@ -144,7 +144,11 @@ def _find_levels_below(course_level_groups: list[CompetencyCriteriaGroup]) -> li
 
 
 def _find_criteria(course_branch_levels: list[list[CompetencyCriteriaGroup]]) -> list[CompetencyCriterion]:
-    """Find the live criteria of the groups in the course's branch, with the rows needed to read their rule."""
+    """
+    Find the live criteria of the course branch's groups.
+
+    Each criterion's object tag (its usage key) and rule profile (its rule) are loaded with it.
+    """
     group_ids = [group.id for group in chain.from_iterable(course_branch_levels)]
     return list(
         CompetencyCriterion.objects.filter(group_id__in=group_ids, archived=False, object_tag__archived=False)

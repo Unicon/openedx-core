@@ -23,13 +23,13 @@ Studio.
 Learner routes
 --------------
 
-The route that lists a course run's competency criteria, ``courses/<course_key>/competency-criteria/``,
-lives in ``openedx_learning.learner_urls``. Mount that module in the LMS, apart from
-``openedx_learning.urls``, which holds the authoring routes for the CMS. An LMS that mounts only the
-learner URLs answers every authoring route with 404.
+``openedx_learning.learner_urls`` holds the route listing a course run's competency criteria,
+``cbe/v1/courses/<course_key>/competency-criteria/`` below its mount point. Mount it in the LMS, apart
+from ``openedx_learning.urls``, the CMS's authoring routes. An LMS mounting only the learner URLs answers
+every authoring route with 404.
 
 Access is the permission ``openedx_learning.view_course_competency_criteria``, available as
 ``openedx_learning.rules.VIEW_COURSE_COMPETENCY_CRITERIA`` and checked with the course key. The default
 admits any signed-in user, so an LMS should rebind it with ``rules.set_perm`` to a rule that checks, for
-example, enrollment. Core registers its default only if no rule is registered under that name yet, so
-the host's rule wins whether it is registered before or after openedx-core loads.
+example, enrollment. openedx-core registers its default only if no rule is registered under that name
+yet, so the host's rule wins whether it is registered before or after openedx-core loads.
